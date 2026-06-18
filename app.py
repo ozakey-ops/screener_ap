@@ -526,17 +526,27 @@ def show_detail(stock):
     _cc = "#089981" if (chg or 0)>0 else "#e8394a" if (chg or 0)<0 else "#5d6278"
     _cs = "+" if (chg or 0)>0 else ""
     _cv = chg if chg is not None else 0.0
+    def _card(label, val_html):
+        return (f'<div style="background:#fff;border:1px solid #dde1ec;border-radius:10px;'
+                f'padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.04);min-height:82px;'
+                f'display:flex;flex-direction:column;justify-content:center">'
+                f'<div style="font-size:11px;color:#5d6278;font-weight:600;margin-bottom:6px">{label}</div>'
+                f'{val_html}</div>')
     with c1:
-        st.markdown(
-            '<div style="background:#fff;border:1px solid #dde1ec;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.04)">'
-            f'<div style="font-size:11px;color:#5d6278;font-weight:600;margin-bottom:4px">현재가</div>'
-            '<div style="display:flex;align-items:baseline;gap:10px">'
+        st.markdown(_card("현재가",
+            f'<div style="display:flex;align-items:baseline;gap:10px">'
             f'<span style="font-size:24px;font-weight:800;color:#131722;font-variant-numeric:tabular-nums">{fmt_price(close)}</span>'
-            f'<span style="font-size:14px;font-weight:700;color:{_cc}">{_cs}{_cv:.2f}%</span>'
-            '</div></div>',
+            f'<span style="font-size:14px;font-weight:700;color:{_cc}">{_cs}{_cv:.2f}%</span></div>'),
             unsafe_allow_html=True)
-    with c2: st.metric("시가총액", fmt_mktcap(mc))
-    with c3: st.metric("시장", mkt)
+    with c2:
+        st.markdown(_card("시가총액",
+            f'<div style="font-size:24px;font-weight:800;color:#131722">{fmt_mktcap(mc)}</div>'),
+            unsafe_allow_html=True)
+    with c3:
+        _mc = "#1a6fe8" if mkt=="KOSPI" else "#089981"
+        st.markdown(_card("시장",
+            f'<div style="font-size:24px;font-weight:800;color:{_mc}">{mkt}</div>'),
+            unsafe_allow_html=True)
 
     # DART 재무
     with st.spinner("재무 데이터 수집 중..."):
@@ -673,17 +683,13 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── 필터 ──
-    mkt_col, excl_col, sort_col = st.columns([3, 2, 1])
+    mkt_col, excl_col = st.columns([2, 4])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
     with excl_col:
-        st.markdown('<div style="padding-top:6px">', unsafe_allow_html=True)
         excl = st.checkbox("우선·스팩 제외")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with sort_col:
-        sort_by = st.selectbox("정렬", ["시가총액","거래량","등락률","현재가"],
-                                label_visibility="collapsed")
+    sort_by = "시가총액"   # 기본 정렬: 시가총액
 
     # ── 필터링 ──
     q = search.strip().lower()
@@ -696,6 +702,53 @@ def main():
     filtered.sort(key=lambda x: x.get(sort_map[sort_by], 0) or 0, reverse=True)
 
     st.markdown(f'<div class="tv-count">🔎 {len(filtered):,}개 종목 표시</div>', unsafe_allow_html=True)
+
+    # ── 위로가기 버튼 + 체크박스 숨기기 ──
+    _top_js = '''<script>
+    (function(){
+      var p = window.parent;
+      if (!p.document.getElementById("_stb_top")) {
+        var b = p.document.createElement("button");
+        b.id = "_stb_top";
+        b.textContent = "▲";
+        b.style.cssText = "position:fixed;bottom:24px;right:20px;z-index:9999;"
+          + "width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;"
+          + "background:rgba(26,111,232,.8);color:#fff;font-size:16px;"
+          + "box-shadow:0 3px 12px rgba(0,0,0,.25);";
+        b.onclick = function(){
+          /* scrollIntoView 방식: 페이지 최상단 요소 기준 */
+          var anchor = p.document.querySelector(".tv-topbar")
+                    || p.document.querySelector("[data-testid=\"stHeader\"]")
+                    || p.document.body.firstElementChild;
+          if (anchor) { anchor.scrollIntoView({behavior:"smooth", block:"start"}); return; }
+          /* fallback: 모든 스크롤 컨테이너 강제 top=0 */
+          ["[data-testid=\"stAppViewContainer\"]","section.main",".main","html","body"]
+            .forEach(function(s){ var e=p.document.querySelector(s); if(e) e.scrollTop=0; });
+        };
+        p.document.body.appendChild(b);
+      }
+      /* 체크박스 숨기기 */
+      function hideCB(){
+        p.document.querySelectorAll(
+          "div[data-testid=\"stDataFrame\"] input[type=\"checkbox\"]"
+        ).forEach(function(el){
+          el.style.display="none";
+          if(el.parentElement) el.parentElement.style.cssText+=
+            "width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;";
+        });
+        p.document.querySelectorAll(
+          "div[data-testid=\"stDataFrame\"] [aria-colindex=\"1\"]"
+        ).forEach(function(el){
+          el.style.cssText+="width:0!important;min-width:0!important;"
+            +"padding:0!important;overflow:hidden!important;border:none!important;";
+        });
+      }
+      hideCB();
+      var df=p.document.querySelector("div[data-testid=\"stDataFrame\"]");
+      if(df && !df._cbo){df._cbo=new MutationObserver(hideCB);df._cbo.observe(df,{subtree:true,childList:true});}
+    })();
+    </script>'''
+    st.components.v1.html(_top_js, height=0)
 
     # ── 종목 테이블 ──
     if not filtered:
@@ -722,68 +775,6 @@ def main():
             "거래량(주)": st.column_config.NumberColumn(format="%,d"),
         }
     )
-
-    # 위로가기 버튼 + 체크박스 숨기기 (JavaScript)
-    _js = """
-    <script>
-    (function(){
-      var p = window.parent;
-
-      /* ── 위로가기 버튼 ── */
-      if (!p.document.getElementById('scroll-top-btn-outer')) {
-        var btn = p.document.createElement('button');
-        btn.id = 'scroll-top-btn-outer';
-        btn.textContent = '▲';
-        btn.style.cssText = 'position:fixed;bottom:24px;right:20px;z-index:9999;'
-          + 'width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;'
-          + 'background:rgba(26,111,232,.75);color:#fff;font-size:16px;'
-          + 'box-shadow:0 3px 10px rgba(0,0,0,.2);';
-        btn.onclick = function() {
-          var tgts = [
-            p.document.querySelector('[data-testid="stAppViewContainer"]'),
-            p.document.querySelector('section.main'),
-            p.document.querySelector('.main'),
-            p.document.documentElement, p.document.body
-          ];
-          for (var i=0;i<tgts.length;i++){
-            if (tgts[i] && tgts[i].scrollTop > 0){
-              tgts[i].scrollTo({top:0,behavior:'smooth'}); return;
-            }
-          }
-          p.scrollTo({top:0,behavior:'smooth'});
-        };
-        p.document.body.appendChild(btn);
-      }
-
-      /* ── 데이터프레임 체크박스 숨기기 ── */
-      function hideCheckboxes() {
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] input[type="checkbox"]'
-        ).forEach(function(el){
-          el.style.display='none';
-          if(el.parentElement) el.parentElement.style.cssText+=
-            'width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;';
-        });
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] [role="checkbox"]'
-        ).forEach(function(el){ el.style.display='none'; });
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] [aria-colindex="1"]'
-        ).forEach(function(el){
-          el.style.cssText+='width:0!important;min-width:0!important;'
-            +'padding:0!important;overflow:hidden!important;border:none!important;';
-        });
-      }
-      hideCheckboxes();
-      var df = p.document.querySelector('div[data-testid="stDataFrame"]');
-      if (df && !df._cbObserver) {
-        df._cbObserver = new MutationObserver(hideCheckboxes);
-        df._cbObserver.observe(df, {subtree:true,childList:true,attributes:true});
-      }
-    })();
-    </script>
-    """
-    st.components.v1.html(_js, height=0)
 
     rows = event.selection.rows if hasattr(event, "selection") else []
     if rows:
