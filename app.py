@@ -25,16 +25,100 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-  .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-  .metric-card { background:#f8f9fc; border:1px solid #e0e4ef;
-    border-radius:10px; padding:12px 10px; text-align:center; }
-  .metric-label { font-size:11px; color:#5d6278; margin-bottom:4px; }
-  .metric-value { font-size:18px; font-weight:800; color:#131722; }
-  .metric-formula { font-size:9px; color:#9da3b4; margin-top:3px; }
-  .pos { color:#089981 !important; }
-  .neg { color:#e8394a !important; }
-  div[data-testid="stMetric"] { background:#f8f9fc; border-radius:8px;
-    border:1px solid #e0e4ef; padding:8px; }
+  /* ── 전역 배경 / 폰트 ── */
+  .stApp { background:#f0f3fa; }
+  .block-container { padding-top: 5rem !important; padding-bottom:1rem;
+    max-width:1200px; }
+  /* Streamlit 상단바 투명 처리 */
+  header[data-testid="stHeader"] {
+    background:rgba(240,243,250,0.97) !important;
+    border-bottom:1px solid #dde1ec;
+    backdrop-filter:blur(8px);
+  }
+  /* 툴바 아이콘 색 */
+  header[data-testid="stHeader"] button { color:#5d6278 !important; }
+
+  /* ── KRX 로고 헤더 바 ── */
+  .tv-topbar {
+    display:flex; align-items:center; gap:12px;
+    background:#ffffff; border:1px solid #dde1ec;
+    border-radius:10px; padding:10px 16px; margin-bottom:12px;
+    box-shadow:0 2px 6px rgba(0,0,0,.05);
+  }
+  .tv-logo { font-size:18px; font-weight:800; color:#131722;
+    letter-spacing:-.5px; white-space:nowrap; }
+  .tv-logo span { color:#1a6fe8; }
+  .tv-date { font-size:11px; color:#9da3b4; margin-left:auto; white-space:nowrap; }
+
+  /* ── 필터 바 ── */
+  .tv-filterbar {
+    background:#ffffff; border:1px solid #dde1ec; border-radius:10px;
+    padding:8px 14px; margin-bottom:10px;
+    box-shadow:0 1px 4px rgba(0,0,0,.04);
+  }
+
+  /* ── 종목 수 ── */
+  .tv-count { font-size:12px; color:#5d6278; padding:4px 0 6px; }
+
+  /* ── 지표 카드 ── */
+  .metric-card {
+    background:#ffffff; border:1px solid #dde1ec;
+    border-radius:10px; padding:14px 10px; text-align:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.04);
+  }
+  .metric-label { font-size:11px; color:#5d6278; margin-bottom:4px;
+    font-weight:600; letter-spacing:.3px; }
+  .metric-value { font-size:20px; font-weight:800; color:#131722;
+    font-variant-numeric:tabular-nums; }
+  .metric-formula { font-size:9px; color:#b0b5c5; margin-top:4px; }
+
+  /* ── Streamlit metric 카드 ── */
+  div[data-testid="stMetric"] {
+    background:#ffffff !important; border-radius:10px;
+    border:1px solid #dde1ec; padding:10px 12px;
+    box-shadow:0 1px 4px rgba(0,0,0,.04);
+  }
+  div[data-testid="stMetricValue"] { color:#131722 !important;
+    font-weight:800 !important; }
+
+  /* ── 데이터프레임 ── */
+  .stDataFrame { border-radius:10px; overflow:hidden;
+    border:1px solid #dde1ec !important;
+    box-shadow:0 2px 8px rgba(0,0,0,.05); }
+
+  /* ── 입력 필드 ── */
+  .stTextInput input {
+    background:#f8f9fc !important; border:1px solid #dde1ec !important;
+    border-radius:20px !important; color:#131722 !important;
+    font-size:13px !important;
+  }
+  .stTextInput input:focus { border-color:#1a6fe8 !important;
+    box-shadow:0 0 0 2px rgba(26,111,232,.15) !important; }
+
+  /* ── 버튼 ── */
+  .stButton button {
+    background:#1a6fe8 !important; color:#fff !important;
+    border:none !important; border-radius:8px !important;
+    font-weight:600 !important;
+  }
+  .stButton button:hover { background:#1458c0 !important; }
+
+  /* ── 라디오/체크박스 ── */
+  .stRadio label { color:#131722 !important; font-size:13px !important; }
+  .stCheckbox label { color:#131722 !important; font-size:13px !important; }
+
+  /* ── 섹션 제목 ── */
+  h2, h3 { color:#131722 !important; font-weight:800 !important; }
+
+  /* ── expander ── */
+  .streamlit-expanderHeader { background:#f8f9fc !important;
+    border-radius:8px; color:#131722 !important; }
+
+  /* ── selectbox ── */
+  .stSelectbox select, div[data-baseweb="select"] {
+    border-color:#dde1ec !important; border-radius:8px !important;
+    background:#ffffff !important; color:#131722 !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,7 +188,6 @@ def get_all_stocks():
         rows.extend(data)
     return rows, bas_dd
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def normalize_stocks(raw):
     result = []
     for row in raw:
@@ -517,23 +600,36 @@ def main():
         return
 
     # ── 헤더 ──
-    hcol1, hcol2 = st.columns([1, 6])
-    with hcol1:
-        st.markdown("### 📈 KRX")
-    with hcol2:
-        search = st.text_input("검색", placeholder="종목명 또는 코드 검색...",
-                                label_visibility="collapsed")
+    search = st.text_input("검색", placeholder="🔍  종목명 또는 코드 검색...",
+                            label_visibility="collapsed")
 
     # ── 데이터 로드 ──
     with st.spinner("KRX 데이터 수집 중..."):
-        raw, bas_dd = get_all_stocks()
+        try:
+            raw, bas_dd = get_all_stocks()
+        except Exception as e:
+            st.error(f"KRX API 오류: {e}")
+            st.stop()
         stocks = normalize_stocks(raw)
+        if not stocks:
+            st.warning("⚠️ KRX에서 종목 데이터를 가져오지 못했습니다. "
+                       "API 키를 확인하거나 잠시 후 다시 시도해 주세요.")
+            st.code(f"조회일: {bas_dd}\n수신 raw 건수: {len(raw)}")
+            if st.button("🔄 새로고침"):
+                st.cache_data.clear()
+                st.rerun()
+            st.stop()
 
     date_disp = f"{bas_dd[:4]}.{bas_dd[4:6]}.{bas_dd[6:]}"
-    st.caption(f"📅 {date_disp} 기준  |  총 {len(stocks):,}개 종목")
+    st.markdown(f"""
+    <div class="tv-topbar">
+      <div class="tv-logo">📈 <span>KRX</span> 주식 스크리너</div>
+      <div class="tv-date">📅 {date_disp} 기준 &nbsp;|&nbsp; 총 {len(stocks):,}개 종목</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── 필터 ──
-    fc1, fc2, fc3, fc4 = st.columns([1,1,1,2])
+    fc1, fc2, fc3 = st.columns([2, 1, 1])
     with fc1:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
@@ -542,8 +638,6 @@ def main():
     with fc3:
         sort_by = st.selectbox("정렬", ["시가총액","거래량","등락률","현재가"],
                                 label_visibility="collapsed")
-    with fc4:
-        pass
 
     # ── 필터링 ──
     q = search.strip().lower()
@@ -555,7 +649,7 @@ def main():
     sort_map = {"시가총액":"mktcap","거래량":"volume","등락률":"chg_rt","현재가":"close"}
     filtered.sort(key=lambda x: x.get(sort_map[sort_by], 0) or 0, reverse=True)
 
-    st.markdown(f"**{len(filtered):,}개 종목**")
+    st.markdown(f'<div class="tv-count">🔎 {len(filtered):,}개 종목 표시</div>', unsafe_allow_html=True)
 
     # ── 종목 테이블 ──
     df = pd.DataFrame([{
