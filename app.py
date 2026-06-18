@@ -5,6 +5,8 @@ Secrets: KRX_API_KEY / DART_API_KEY
 """
 
 import os, threading, zipfile, io, json
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import xml.etree.ElementTree as ET
 import requests
 import pandas as pd
@@ -229,14 +231,24 @@ def normalize_stocks(raw):
 # ─────────────────────────────────────────────────────────────
 # DART 코드 맵
 # ─────────────────────────────────────────────────────────────
+def _dart_session():
+    s = requests.Session()
+    retry = Retry(total=4, backoff_factor=2,
+                  status_forcelist=[429, 500, 502, 503, 504],
+                  allowed_methods=["GET"])
+    s.mount("https://", HTTPAdapter(max_retries=retry))
+    return s
+
 @st.cache_resource
 def get_corp_map():
     sh = _shared()
     if sh["corp_map"]:
         return sh["corp_map"]
     try:
-        r = requests.get(f"{DART_BASE}/corpCode.xml",
-            params={"crtfc_key": DART_API_KEY}, timeout=30)
+        sess = _dart_session()
+        r = sess.get(f"{DART_BASE}/corpCode.xml",
+            params={"crtfc_key": DART_API_KEY}, timeout=60)
+        r.raise_for_status()
         z = zipfile.ZipFile(io.BytesIO(r.content))
         xml_data = z.read("CORPCODE.xml")
         root = ET.fromstring(xml_data)
@@ -246,10 +258,11 @@ def get_corp_map():
             cc = (item.findtext("corp_code")  or "").strip()
             if sc and cc:
                 m[sc.zfill(6)] = cc
-        sh["corp_map"] = m
+        if m:
+            sh["corp_map"] = m
         return m
     except Exception as e:
-        st.warning(f"DART 기업코드 로드 실패: {e}")
+        st.warning(f"DART 기업코드 로드 실패 (다시 클릭해 주세요): {e}")
         return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -510,8 +523,18 @@ def show_detail(stock):
     badge = "K" if mkt == "KOSPI" else "Q"
     st.markdown(f'<div style="font-size:22px;font-weight:800;color:#131722;margin-bottom:8px"><span style="background:{"#deeaff" if mkt=="KOSPI" else "#d5f5ef"};color:{"#1a6fe8" if mkt=="KOSPI" else "#089981"};border-radius:4px;padding:2px 7px;font-size:13px;margin-right:8px">{badge}</span>{name} <span style="color:#9da3b4;font-size:14px">{code}</span></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    with c1: st.metric("현재가", fmt_price(close),
-                        f"{fmt_chg(chg)}", delta_color="normal" if chg >= 0 else "inverse")
+    _cc = "#089981" if (chg or 0)>0 else "#e8394a" if (chg or 0)<0 else "#5d6278"
+    _cs = "+" if (chg or 0)>0 else ""
+    _cv = chg if chg is not None else 0.0
+    with c1:
+        st.markdown(
+            '<div style="background:#fff;border:1px solid #dde1ec;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.04)">'
+            f'<div style="font-size:11px;color:#5d6278;font-weight:600;margin-bottom:4px">현재가</div>'
+            '<div style="display:flex;align-items:baseline;gap:10px">'
+            f'<span style="font-size:24px;font-weight:800;color:#131722;font-variant-numeric:tabular-nums">{fmt_price(close)}</span>'
+            f'<span style="font-size:14px;font-weight:700;color:{_cc}">{_cs}{_cv:.2f}%</span>'
+            '</div></div>',
+            unsafe_allow_html=True)
     with c2: st.metric("시가총액", fmt_mktcap(mc))
     with c3: st.metric("시장", mkt)
 
@@ -650,17 +673,15 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── 필터 ──
-    fc1, fc2 = st.columns([3, 1])
-    with fc1:
-        st.markdown('<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">', unsafe_allow_html=True)
-        fcol_a, fcol_b = st.columns([2, 1])
-        with fcol_a:
-            market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
-                               horizontal=True, label_visibility="collapsed")
-        with fcol_b:
-            excl = st.checkbox("우선·스팩 제외")
+    mkt_col, excl_col, sort_col = st.columns([3, 2, 1])
+    with mkt_col:
+        market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
+                           horizontal=True, label_visibility="collapsed")
+    with excl_col:
+        st.markdown('<div style="padding-top:6px">', unsafe_allow_html=True)
+        excl = st.checkbox("우선·스팩 제외")
         st.markdown('</div>', unsafe_allow_html=True)
-    with fc2:
+    with sort_col:
         sort_by = st.selectbox("정렬", ["시가총액","거래량","등락률","현재가"],
                                 label_visibility="collapsed")
 
@@ -686,27 +707,31 @@ def main():
         "시장": s["market"],
         "현재가(원)": int(s["close"]) if s["close"] else 0,
         "등락률(%)": round(s["chg_rt"], 2) if s["chg_rt"] else 0.0,
-        "거래금액": fmt_mktcap(int(s["close"] * s["volume"])) if s["close"] and s["volume"] else "-",
+        "거래금액(억)": round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
         "거래량(주)": int(s["volume"]) if s["volume"] else 0,
-        "시가총액": fmt_mktcap(s["mktcap"]) if s["mktcap"] else "-",
-    } for s in filtered[:300]])
+    } for s in filtered])
 
     event = st.dataframe(
         df, use_container_width=True, hide_index=True,
+        height=600,
         on_select="rerun", selection_mode="single-row",
         column_config={
             "등락률(%)": st.column_config.NumberColumn(format="%.2f%%"),
-            "현재가(원)": st.column_config.NumberColumn(format="%d"),
-            "거래량(주)": st.column_config.NumberColumn(format="%d"),
+            "현재가(원)": st.column_config.NumberColumn(format="%,d"),
+            "거래금액(억)": st.column_config.NumberColumn(format="%,.1f억"),
+            "거래량(주)": st.column_config.NumberColumn(format="%,d"),
         }
     )
 
-    # 위로가기 버튼 (JavaScript)
-    st.components.v1.html("""
+    # 위로가기 버튼 + 체크박스 숨기기 (JavaScript)
+    _js = """
     <script>
-      var btn = window.parent.document.getElementById('scroll-top-btn-outer');
-      if (!btn) {
-        btn = window.parent.document.createElement('button');
+    (function(){
+      var p = window.parent;
+
+      /* ── 위로가기 버튼 ── */
+      if (!p.document.getElementById('scroll-top-btn-outer')) {
+        var btn = p.document.createElement('button');
         btn.id = 'scroll-top-btn-outer';
         btn.textContent = '▲';
         btn.style.cssText = 'position:fixed;bottom:24px;right:20px;z-index:9999;'
@@ -714,13 +739,51 @@ def main():
           + 'background:rgba(26,111,232,.75);color:#fff;font-size:16px;'
           + 'box-shadow:0 3px 10px rgba(0,0,0,.2);';
         btn.onclick = function() {
-          var main = window.parent.document.querySelector('section.main');
-          if (main) main.scrollTo({top:0, behavior:'smooth'});
+          var tgts = [
+            p.document.querySelector('[data-testid="stAppViewContainer"]'),
+            p.document.querySelector('section.main'),
+            p.document.querySelector('.main'),
+            p.document.documentElement, p.document.body
+          ];
+          for (var i=0;i<tgts.length;i++){
+            if (tgts[i] && tgts[i].scrollTop > 0){
+              tgts[i].scrollTo({top:0,behavior:'smooth'}); return;
+            }
+          }
+          p.scrollTo({top:0,behavior:'smooth'});
         };
-        window.parent.document.body.appendChild(btn);
+        p.document.body.appendChild(btn);
       }
+
+      /* ── 데이터프레임 체크박스 숨기기 ── */
+      function hideCheckboxes() {
+        p.document.querySelectorAll(
+          'div[data-testid="stDataFrame"] input[type="checkbox"]'
+        ).forEach(function(el){
+          el.style.display='none';
+          if(el.parentElement) el.parentElement.style.cssText+=
+            'width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;';
+        });
+        p.document.querySelectorAll(
+          'div[data-testid="stDataFrame"] [role="checkbox"]'
+        ).forEach(function(el){ el.style.display='none'; });
+        p.document.querySelectorAll(
+          'div[data-testid="stDataFrame"] [aria-colindex="1"]'
+        ).forEach(function(el){
+          el.style.cssText+='width:0!important;min-width:0!important;'
+            +'padding:0!important;overflow:hidden!important;border:none!important;';
+        });
+      }
+      hideCheckboxes();
+      var df = p.document.querySelector('div[data-testid="stDataFrame"]');
+      if (df && !df._cbObserver) {
+        df._cbObserver = new MutationObserver(hideCheckboxes);
+        df._cbObserver.observe(df, {subtree:true,childList:true,attributes:true});
+      }
+    })();
     </script>
-    """, height=0)
+    """
+    st.components.v1.html(_js, height=0)
 
     rows = event.selection.rows if hasattr(event, "selection") else []
     if rows:
