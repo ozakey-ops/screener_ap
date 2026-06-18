@@ -88,6 +88,22 @@ st.markdown("""
   .stDataFrame { border-radius:10px; overflow:hidden;
     border:1px solid #dde1ec !important;
     box-shadow:0 2px 8px rgba(0,0,0,.05); }
+  /* 헤더·셀 가운데 정렬 (HTML 렌더 방식) */
+  div[data-testid="stDataFrame"] th,
+  div[data-testid="stDataFrame"] td {
+    text-align: center !important;
+  }
+  /* glide-data-grid 렌더 방식 */
+  div[data-testid="stDataFrame"] [role="columnheader"],
+  div[data-testid="stDataFrame"] [role="gridcell"] {
+    justify-content: center !important;
+    text-align: center !important;
+  }
+  /* 시가총액(8번째 열) 오른쪽 정렬 */
+  div[data-testid="stDataFrame"] [aria-colindex="8"] {
+    justify-content: flex-end !important;
+    text-align: right !important;
+  }
 
   /* ── 입력 필드 ── */
   .stTextInput input {
@@ -141,15 +157,25 @@ st.markdown("""
     display:flex; align-items:center; justify-content:center;
     transition:opacity .2s;
   }
-  /* ── 필터 행: 라디오+체크박스 컬럼을 컨텐츠 너비로 밀착 ── */
+  /* ── 필터 행: 라디오+체크박스 수직 중앙 정렬 + 컨텐츠 너비 밀착 ── */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"]) {
     align-items: center !important;
+    gap: 0 !important;
   }
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
     > [data-testid="stColumn"] {
     flex: 0 0 auto !important;
     width: fit-content !important;
     min-width: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  /* 라디오/체크박스 자체 여백 제거 */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    [data-testid="stRadio"],
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    [data-testid="stCheckbox"] {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -488,12 +514,19 @@ def make_bar_chart(years, values, title, color):
         marker_color=[color if (v or 0) >= 0 else "#e8394a" for v in values],
         marker_line_width=0,
     ))
+    # x축 레이블 겹침 방지: 데이터 수에 따라 각도 조정
+    n = len(years)
+    tick_angle = -40 if n > 8 else 0
+    tick_step  = 2 if n > 10 else 1
     fig.update_layout(
-        title=dict(text=title, font_size=13),
-        margin=dict(l=10,r=10,t=30,b=10),
-        height=220, plot_bgcolor="white",
-        yaxis=dict(gridcolor="#e8ecf5", zeroline=True, zerolinecolor="#aaa"),
-        xaxis=dict(tickfont_size=10),
+        title=dict(text=title, font_size=13, x=0, xanchor="left",
+                   pad=dict(l=4)),
+        margin=dict(l=40, r=10, t=36, b=55 if tick_angle else 30),
+        height=260, plot_bgcolor="white",
+        yaxis=dict(gridcolor="#e8ecf5", zeroline=True, zerolinecolor="#aaa",
+                   tickfont_size=10),
+        xaxis=dict(tickfont_size=10, tickangle=tick_angle,
+                   dtick=tick_step, tickformat="d"),
         showlegend=False,
     )
     return fig
@@ -506,14 +539,25 @@ def make_line_chart(years, series, title):
             x=years, y=vals, name=name,
             line=dict(color=colors[i % len(colors)], width=2.5),
             mode="lines+markers", marker_size=5,
+            connectgaps=False,
         ))
+    n = len(years)
+    tick_angle = -40 if n > 8 else 0
+    tick_step  = 2 if n > 10 else 1
     fig.update_layout(
-        title=dict(text=title, font_size=13),
-        margin=dict(l=10,r=10,t=30,b=10),
-        height=220, plot_bgcolor="white",
-        yaxis=dict(gridcolor="#e8ecf5"),
-        xaxis=dict(tickfont_size=10),
-        legend=dict(font_size=10, orientation="h", yanchor="bottom", y=1.02),
+        title=dict(text=title, font_size=13, x=0, xanchor="left",
+                   pad=dict(l=4)),
+        margin=dict(l=40, r=10, t=36, b=70 if tick_angle else 50),
+        height=280, plot_bgcolor="white",
+        yaxis=dict(gridcolor="#e8ecf5", tickfont_size=10),
+        xaxis=dict(tickfont_size=10, tickangle=tick_angle,
+                   dtick=tick_step, tickformat="d"),
+        legend=dict(
+            font_size=10, orientation="h",
+            yanchor="top", y=-0.18,    # 차트 아래쪽 배치
+            xanchor="left", x=0,
+            bgcolor="rgba(255,255,255,0)",
+        ),
     )
     return fig
 
@@ -713,54 +757,76 @@ def main():
     sort_map = {"시가총액":"mktcap","거래량":"volume","등락률":"chg_rt","현재가":"close"}
     filtered.sort(key=lambda x: x.get(sort_map[sort_by], 0) or 0, reverse=True)
 
-    st.markdown(f'<div class="tv-count">🔎 {len(filtered):,}개 종목 표시</div>', unsafe_allow_html=True)
-
-    # ── 위로가기 버튼 + 체크박스 숨기기 ──
-    _top_js = '''<script>
-    (function(){
-      var p = window.parent;
-      if (!p.document.getElementById("_stb_top")) {
-        var b = p.document.createElement("button");
-        b.id = "_stb_top";
-        b.textContent = "▲";
-        b.style.cssText = "position:fixed;bottom:24px;right:20px;z-index:9999;"
-          + "width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;"
-          + "background:rgba(26,111,232,.8);color:#fff;font-size:16px;"
-          + "box-shadow:0 3px 12px rgba(0,0,0,.25);";
-        b.onclick = function(){
-          /* scrollIntoView 방식: 페이지 최상단 요소 기준 */
-          var anchor = p.document.querySelector(".tv-topbar")
-                    || p.document.querySelector("[data-testid=\"stHeader\"]")
-                    || p.document.body.firstElementChild;
-          if (anchor) { anchor.scrollIntoView({behavior:"smooth", block:"start"}); return; }
-          /* fallback: 모든 스크롤 컨테이너 강제 top=0 */
-          ["[data-testid=\"stAppViewContainer\"]","section.main",".main","html","body"]
-            .forEach(function(s){ var e=p.document.querySelector(s); if(e) e.scrollTop=0; });
-        };
-        p.document.body.appendChild(b);
+    # ── 위로가기 버튼: 테이블 위 iframe 버튼 (항상 보임) + 체크박스 숨기기 ──
+    _scroll_btn = """
+    <style>
+      body{margin:0;background:transparent;}
+      button{
+        display:flex;align-items:center;gap:6px;
+        padding:5px 14px;border:none;border-radius:20px;cursor:pointer;
+        background:rgba(26,111,232,.85);color:#fff;font-size:13px;font-weight:600;
+        box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;
       }
-      /* 체크박스 숨기기 */
+      button:hover{background:rgba(20,88,192,.9);}
+    </style>
+    <button onclick="
+      var s=window.parent.document.querySelector('section.main')
+           ||window.parent.document.querySelector('[data-testid=stAppViewContainer]');
+      if(s)s.scrollTo({top:0,behavior:'smooth'});
+      else window.parent.scrollTo({top:0,behavior:'smooth'});
+    ">▲ 맨 위로</button>
+    """
+    _cb_hide = """
+    <script>
+    (function(){
+      var p=window.parent;
       function hideCB(){
         p.document.querySelectorAll(
-          "div[data-testid=\"stDataFrame\"] input[type=\"checkbox\"]"
+          'div[data-testid="stDataFrame"] input[type="checkbox"]'
         ).forEach(function(el){
-          el.style.display="none";
+          el.style.display='none';
           if(el.parentElement) el.parentElement.style.cssText+=
-            "width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;";
+            'width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;';
         });
         p.document.querySelectorAll(
-          "div[data-testid=\"stDataFrame\"] [aria-colindex=\"1\"]"
+          'div[data-testid="stDataFrame"] [aria-colindex="1"]'
         ).forEach(function(el){
-          el.style.cssText+="width:0!important;min-width:0!important;"
-            +"padding:0!important;overflow:hidden!important;border:none!important;";
+          el.style.cssText+='width:0!important;min-width:0!important;'
+            +'padding:0!important;overflow:hidden!important;border:none!important;';
         });
       }
-      hideCB();
-      var df=p.document.querySelector("div[data-testid=\"stDataFrame\"]");
-      if(df && !df._cbo){df._cbo=new MutationObserver(hideCB);df._cbo.observe(df,{subtree:true,childList:true});}
+      function centerCells(){
+        p.document.querySelectorAll(
+          'div[data-testid="stDataFrame"] [role="columnheader"],'
+          +'div[data-testid="stDataFrame"] [role="gridcell"]'
+        ).forEach(function(el){
+          el.style.justifyContent='center';
+          el.style.textAlign='center';
+        });
+        /* 시가총액(마지막 열) 오른쪽 정렬 */
+        p.document.querySelectorAll(
+          'div[data-testid="stDataFrame"] [aria-colindex="8"]'
+        ).forEach(function(el){
+          el.style.justifyContent='flex-end';
+          el.style.textAlign='right';
+        });
+      }
+      hideCB(); centerCells();
+      var df=p.document.querySelector('div[data-testid="stDataFrame"]');
+      if(df&&!df._cbo){
+        df._cbo=new MutationObserver(function(){hideCB();centerCells();});
+        df._cbo.observe(df,{subtree:true,childList:true});
+      }
     })();
-    </script>'''
-    st.components.v1.html(_top_js, height=0)
+    </script>
+    """
+    col_count, col_btn = st.columns([6, 1])
+    with col_count:
+        st.markdown(f'<div class="tv-count" style="padding-top:6px">🔎 {len(filtered):,}개 종목 표시</div>',
+                    unsafe_allow_html=True)
+    with col_btn:
+        st.components.v1.html(_scroll_btn, height=36)
+    st.components.v1.html(_cb_hide, height=0)
 
     # ── 종목 테이블 ──
     if not filtered:
