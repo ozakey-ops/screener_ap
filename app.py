@@ -10,6 +10,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -118,6 +119,25 @@ st.markdown("""
   .stSelectbox select, div[data-baseweb="select"] {
     border-color:#dde1ec !important; border-radius:8px !important;
     background:#ffffff !important; color:#131722 !important;
+  }
+  /* ── 데이터프레임 체크박스 컬럼 숨기기 ── */
+  div[data-testid="stDataFrame"] thead tr th:first-child,
+  div[data-testid="stDataFrame"] tbody tr td:first-child {
+    display:none !important; width:0 !important; padding:0 !important;
+  }
+  /* 행 클릭 커서 */
+  div[data-testid="stDataFrame"] tbody tr { cursor:pointer; }
+  div[data-testid="stDataFrame"] tbody tr:hover td {
+    background:rgba(26,111,232,.06) !important;
+  }
+  /* ── 위로가기 버튼 ── */
+  #scroll-top-btn {
+    position:fixed; bottom:24px; right:20px; z-index:9999;
+    width:40px; height:40px; border-radius:50%; border:none; cursor:pointer;
+    background:rgba(26,111,232,.7); color:#fff; font-size:16px;
+    box-shadow:0 3px 10px rgba(0,0,0,.2); backdrop-filter:blur(4px);
+    display:flex; align-items:center; justify-content:center;
+    transition:opacity .2s;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -228,7 +248,8 @@ def get_corp_map():
                 m[sc.zfill(6)] = cc
         sh["corp_map"] = m
         return m
-    except Exception:
+    except Exception as e:
+        st.warning(f"DART 기업코드 로드 실패: {e}")
         return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -486,8 +507,8 @@ def show_detail(stock):
     chg   = stock["chg_rt"]
     mc    = stock["mktcap"]
 
-    badge = "🟦" if mkt == "KOSPI" else "🟩"
-    st.markdown(f"## {badge} {name} `{code}`")
+    badge = "K" if mkt == "KOSPI" else "Q"
+    st.markdown(f'<div style="font-size:22px;font-weight:800;color:#131722;margin-bottom:8px"><span style="background:{"#deeaff" if mkt=="KOSPI" else "#d5f5ef"};color:{"#1a6fe8" if mkt=="KOSPI" else "#089981"};border-radius:4px;padding:2px 7px;font-size:13px;margin-right:8px">{badge}</span>{name} <span style="color:#9da3b4;font-size:14px">{code}</span></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("현재가", fmt_price(close),
                         f"{fmt_chg(chg)}", delta_color="normal" if chg >= 0 else "inverse")
@@ -509,7 +530,7 @@ def show_detail(stock):
         return [ratios[y].get(key) for y in years]
 
     # ── 밸류에이션 ──
-    st.subheader("📊 밸류에이션")
+    st.subheader("밸류에이션")
     latest = ratios.get(years[-1], {})
     vc = st.columns(3)
     for col, (k, formula) in zip(vc, [
@@ -523,7 +544,7 @@ def show_detail(stock):
         </div>""", unsafe_allow_html=True)
 
     # ── 수익성 ──
-    st.subheader("💰 수익성")
+    st.subheader("수익성")
     prof_series = {}
     for k in ["ROE","ROA","영업이익률"]:
         s = get_series(k)
@@ -534,7 +555,7 @@ def show_detail(stock):
                         use_container_width=True, key="prof_chart")
 
     # ── 성장성 ──
-    st.subheader("📈 성장성")
+    st.subheader("성장성")
     gc1, gc2 = st.columns(2)
     rev_s = get_series("매출액증가율")
     op_s  = get_series("영업이익증가율")
@@ -546,7 +567,7 @@ def show_detail(stock):
                          use_container_width=True, key="op_chart")
 
     # ── 재무건전성 ──
-    st.subheader("🛡️ 재무건전성")
+    st.subheader("재무건전성")
     stab_series = {}
     for k in ["부채비율","유동비율"]:
         s = get_series(k)
@@ -563,7 +584,7 @@ def show_detail(stock):
     # ── 배당수익률 ──
     div_s = get_series("배당수익률")
     if any(v is not None for v in div_s):
-        st.subheader("💵 배당수익률")
+        st.subheader("배당수익률")
         st.plotly_chart(make_bar_chart(years, div_s, "배당수익률 (%)", "#7c4dff"),
                         use_container_width=True, key="div_chart")
 
@@ -629,13 +650,17 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── 필터 ──
-    fc1, fc2, fc3 = st.columns([2, 1, 1])
+    fc1, fc2 = st.columns([3, 1])
     with fc1:
-        market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
-                           horizontal=True, label_visibility="collapsed")
+        st.markdown('<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">', unsafe_allow_html=True)
+        fcol_a, fcol_b = st.columns([2, 1])
+        with fcol_a:
+            market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
+                               horizontal=True, label_visibility="collapsed")
+        with fcol_b:
+            excl = st.checkbox("우선·스팩 제외")
+        st.markdown('</div>', unsafe_allow_html=True)
     with fc2:
-        excl = st.checkbox("우선·스팩 제외")
-    with fc3:
         sort_by = st.selectbox("정렬", ["시가총액","거래량","등락률","현재가"],
                                 label_visibility="collapsed")
 
@@ -652,19 +677,19 @@ def main():
     st.markdown(f'<div class="tv-count">🔎 {len(filtered):,}개 종목 표시</div>', unsafe_allow_html=True)
 
     # ── 종목 테이블 ──
+    if not filtered:
+        st.info("조건에 맞는 종목이 없습니다.")
+        return
+
     df = pd.DataFrame([{
         "종목명": s["name"],
-        "코드": s["code"],
         "시장": s["market"],
         "현재가(원)": int(s["close"]) if s["close"] else 0,
         "등락률(%)": round(s["chg_rt"], 2) if s["chg_rt"] else 0.0,
+        "거래금액": fmt_mktcap(int(s["close"] * s["volume"])) if s["close"] and s["volume"] else "-",
         "거래량(주)": int(s["volume"]) if s["volume"] else 0,
         "시가총액": fmt_mktcap(s["mktcap"]) if s["mktcap"] else "-",
-    } for s in filtered[:200]])
-
-    if df.empty:
-        st.info("조건에 맞는 종목이 없습니다.")
-        return
+    } for s in filtered[:300]])
 
     event = st.dataframe(
         df, use_container_width=True, hide_index=True,
@@ -675,6 +700,27 @@ def main():
             "거래량(주)": st.column_config.NumberColumn(format="%d"),
         }
     )
+
+    # 위로가기 버튼 (JavaScript)
+    st.components.v1.html("""
+    <script>
+      var btn = window.parent.document.getElementById('scroll-top-btn-outer');
+      if (!btn) {
+        btn = window.parent.document.createElement('button');
+        btn.id = 'scroll-top-btn-outer';
+        btn.textContent = '▲';
+        btn.style.cssText = 'position:fixed;bottom:24px;right:20px;z-index:9999;'
+          + 'width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;'
+          + 'background:rgba(26,111,232,.75);color:#fff;font-size:16px;'
+          + 'box-shadow:0 3px 10px rgba(0,0,0,.2);';
+        btn.onclick = function() {
+          var main = window.parent.document.querySelector('section.main');
+          if (main) main.scrollTo({top:0, behavior:'smooth'});
+        };
+        window.parent.document.body.appendChild(btn);
+      }
+    </script>
+    """, height=0)
 
     rows = event.selection.rows if hasattr(event, "selection") else []
     if rows:
