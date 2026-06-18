@@ -825,25 +825,22 @@ def main():
     # ── 우량주 조건 패널 ──
     if quality_mode:
         st.markdown('<div class="quality-panel">', unsafe_allow_html=True)
-        qa, qb, qc, qd, qe = st.columns([2, 2, 1.2, 2, 2])
+        qa, qb, qc = st.columns([2, 2, 0.8])
         with qa:
-            min_mktcap = st.number_input("시가총액 최소(억)", min_value=0,
-                max_value=100000, value=3000, step=500,
-                help="시가총액이 이 값 이상인 종목만 표시")
+            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=100000,
+                value=(0, 100000), step=500, help="시가총액 범위 (억원)")
         with qb:
-            min_tval = st.number_input("거래대금 최소(억/일)", min_value=0,
-                max_value=1000, value=10, step=5,
-                help="일 평균 거래대금이 이 값 이상")
+            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=1000,
+                value=(0, 1000), step=5, help="일 거래대금 범위 (억원)")
         with qc:
             req_profit = st.checkbox("흑자(EPS>0)", value=True)
+        qd, qe = st.columns([1, 1])
         with qd:
-            min_div = st.number_input("배당수익률 최소(%)", min_value=0.0,
-                max_value=15.0, value=0.0, step=0.5,
-                help="0이면 배당 조건 미적용")
+            div_range = st.slider("배당수익률(%)", min_value=0.0, max_value=15.0,
+                value=(0.0, 15.0), step=0.5, help="배당수익률 범위 (%)")
         with qe:
-            max_pbr = st.number_input("PBR 최대", min_value=0.0,
-                max_value=30.0, value=5.0, step=0.5,
-                help="PBR이 없는 종목은 통과 처리")
+            pbr_range = st.slider("PBR", min_value=0.0, max_value=30.0,
+                value=(0.0, 30.0), step=0.5, help="PBR 범위 (없는 종목은 통과)")
         st.markdown('</div>', unsafe_allow_html=True)
 
         # DART 심화 필터 expander
@@ -871,16 +868,25 @@ def main():
     # KRX 우량주 기본 필터
     if quality_mode:
         def _krx_ok(s):
-            if min_mktcap > 0 and (s.get("mktcap") or 0) < min_mktcap * 1e8:
+            mc = (s.get("mktcap") or 0) / 1e8
+            if not (mktcap_range[0] <= mc <= mktcap_range[1]):
                 return False
-            if min_tval > 0 and (s.get("tval") or 0) < min_tval * 1e8:
+            tv = (s.get("tval") or 0) / 1e8
+            if not (tval_range[0] <= tv <= tval_range[1]):
                 return False
             if req_profit and (s.get("eps") or 0) <= 0:
                 return False
-            if min_div > 0 and (s.get("div") or 0) < min_div:
+            div = s.get("div") or 0
+            if div_range[0] > 0 and div < div_range[0]:
                 return False
-            if max_pbr > 0 and s.get("pbr") and s["pbr"] > max_pbr:
+            if div_range[1] < 15.0 and div > div_range[1]:
                 return False
+            pbr = s.get("pbr")
+            if pbr is not None:
+                if pbr_range[0] > 0 and pbr < pbr_range[0]:
+                    return False
+                if pbr_range[1] < 30.0 and pbr > pbr_range[1]:
+                    return False
             return True
         filtered = [s for s in filtered if _krx_ok(s)]
 
