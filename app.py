@@ -53,11 +53,11 @@ st.markdown("""
   .tv-date { font-size:11px; color:#9da3b4; margin-left:auto; white-space:nowrap; }
 
   /* ── 필터 바 ── */
-  /* ── 우량주 조건 패널 ── */
+  /* ── 필터 조건 카드 ── */
   .quality-panel {
-    background:#f0f6ff; border:1px solid #b8d0f7; border-radius:10px;
-    padding:10px 16px; margin-bottom:10px;
-    box-shadow:0 1px 4px rgba(26,111,232,.08);
+    background:#ffffff; border:1px solid #dde1ec; border-radius:14px;
+    padding:18px 22px; margin-bottom:12px;
+    box-shadow:0 2px 10px rgba(0,0,0,.07);
   }
 
 
@@ -896,7 +896,7 @@ def main():
     """
 
     # ── 필터 Row: 시장(왼쪽) | 우선·스팩 제외 · 필터 · 맨위로 (오른쪽, 균등 배치) ──
-    mkt_col, excl_col, qual_col, btn_col = st.columns([4, 1.5, 1, 1])
+    mkt_col, excl_col, qual_col = st.columns([4, 1.5, 1])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
@@ -904,8 +904,6 @@ def main():
         excl = st.checkbox("우선·스팩 제외")
     with qual_col:
         quality_mode = st.checkbox("🔧 필터")
-    with btn_col:
-        st.components.v1.html(_scroll_btn, height=36)
     sort_by = "시가총액"
 
     # ── 우량주 조건 패널 ──
@@ -1004,6 +1002,10 @@ def main():
             return True
         filtered = [s for s in filtered if _dart_ok(s)]
 
+    # 맨 위로 버튼: 테이블 바로 위 오른쪽
+    _, btn_col = st.columns([5, 1])
+    with btn_col:
+        st.components.v1.html(_scroll_btn, height=30)
     st.components.v1.html(_cb_hide, height=0)
 
 
@@ -1043,19 +1045,11 @@ def main():
 
         }
         if quality_mode:
-            dm_tmp = dart_data.get(s["code"], {})
-            # PBR: KRX 직접값 우선, 없으면 DART 계산값
-            pbr_val = s.get("pbr") or dm_tmp.get("pbr_dart")
-            row["PBR"]    = round(pbr_val, 2) if pbr_val else None
-            # DIV: KRX 직접값 우선, 없으면 DART 계산값
-            div_val = (s.get("div") or 0) or dm_tmp.get("div_dart")
-            row["DIV(%)"] = round(div_val, 2) if div_val else None
             dm = dart_data.get(s["code"], {})
             if dm:
-                row["ROE(%)"]  = dm.get("roe")
+                row["ROE(%)"]     = dm.get("roe")
                 row["부채비율(%)"] = dm.get("debt_ratio")
-            sc = _quality_score(s)
-            row["점수"] = sc
+            row["점수"] = _quality_score(s)
         rows_data.append(row)
 
     df = pd.DataFrame(rows_data)
@@ -1069,8 +1063,6 @@ def main():
 
     }
     if quality_mode:
-        col_cfg["PBR"]      = st.column_config.NumberColumn(format="%.2f")
-        col_cfg["DIV(%)"]   = st.column_config.NumberColumn(format="%.1f%%")
         col_cfg["ROE(%)"]   = st.column_config.NumberColumn(format="%.1f%%")
         col_cfg["부채비율(%)"] = st.column_config.NumberColumn(format="%.0f%%")
         col_cfg["점수"] = st.column_config.ProgressColumn(
