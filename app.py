@@ -141,6 +141,16 @@ st.markdown("""
     display:flex; align-items:center; justify-content:center;
     transition:opacity .2s;
   }
+  /* ── 필터 행: 라디오+체크박스 컬럼을 컨텐츠 너비로 밀착 ── */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"]) {
+    align-items: center !important;
+  }
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    > [data-testid="stColumn"] {
+    flex: 0 0 auto !important;
+    width: fit-content !important;
+    min-width: 0 !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -218,6 +228,7 @@ def normalize_stocks(raw):
         mkt  = str(row.get("MKT_NM","") or row.get("mrktCtg","")).upper()
         close= to_num(row.get("TDD_CLSPRC") or row.get("clpr"))
         vol  = to_num(row.get("ACC_TRDVOL") or row.get("trqu"))
+        tval = to_num(row.get("ACC_TRDVAL") or row.get("trPrc"))   # 거래대금(원)
         chg  = to_num(row.get("FLUC_RT")   or row.get("fltRt"))
         mc   = to_num(row.get("MKTCAP")     or row.get("mrktTotAmt"))
         shr  = to_num(row.get("LIST_SHRS")  or row.get("lstgStCnt"))
@@ -225,7 +236,8 @@ def normalize_stocks(raw):
             continue
         result.append({"code":code,"name":name,
             "market":"KOSPI" if "KOSPI" in mkt else "KOSDAQ",
-            "close":close,"volume":vol,"chg_rt":chg,"mktcap":mc,"shares":shr})
+            "close":close,"volume":vol,"tval":tval,
+            "chg_rt":chg,"mktcap":mc,"shares":shr})
     return result
 
 # ─────────────────────────────────────────────────────────────
@@ -683,7 +695,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── 필터 ──
-    mkt_col, excl_col = st.columns([2, 4])
+    mkt_col, excl_col = st.columns([1, 1])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
@@ -760,8 +772,10 @@ def main():
         "시장": s["market"],
         "현재가(원)": int(s["close"]) if s["close"] else 0,
         "등락률(%)": round(s["chg_rt"], 2) if s["chg_rt"] else 0.0,
-        "거래금액(억)": round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
+        "거래대금(억)": round(s["tval"] / 1e8, 1) if s.get("tval") else
+                        round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
         "거래량(주)": int(s["volume"]) if s["volume"] else 0,
+        "시가총액": fmt_mktcap(s["mktcap"]) if s.get("mktcap") else "-",
     } for s in filtered])
 
     event = st.dataframe(
@@ -771,7 +785,7 @@ def main():
         column_config={
             "등락률(%)": st.column_config.NumberColumn(format="%.2f%%"),
             "현재가(원)": st.column_config.NumberColumn(format="%,d"),
-            "거래금액(억)": st.column_config.NumberColumn(format="%,.1f억"),
+            "거래대금(억)": st.column_config.NumberColumn(format="%,.1f억"),
             "거래량(주)": st.column_config.NumberColumn(format="%,d"),
         }
     )
