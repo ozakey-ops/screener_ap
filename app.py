@@ -171,16 +171,20 @@ st.markdown("""
     min-width: 0 !important;
     padding-bottom: 0 !important;
   }
-  /* 오른쪽 3개 컬럼: 동일 폭 100px, 내용 중앙 정렬 */
+  /* 오른쪽 3개 컬럼: 내용 폭에 맞게, 줄바꿈 금지 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
     > [data-testid="stColumn"]:not(:first-child) {
-    flex: 0 0 100px !important;
-    width: 100px !important;
+    flex: 0 0 auto !important;
+    width: fit-content !important;
     min-width: 0 !important;
     padding-bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+    white-space: nowrap !important;
+  }
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    > [data-testid="stColumn"]:not(:first-child) label,
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    > [data-testid="stColumn"]:not(:first-child) span {
+    white-space: nowrap !important;
   }
   /* 라디오/체크박스 자체 여백 제거 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
@@ -892,7 +896,7 @@ def main():
     """
 
     # ── 필터 Row: 시장(왼쪽) | 우선·스팩 제외 · 필터 · 맨위로 (오른쪽, 균등 배치) ──
-    mkt_col, excl_col, qual_col, btn_col = st.columns([6, 1, 1, 1])
+    mkt_col, excl_col, qual_col, btn_col = st.columns([4, 1.5, 1, 1])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
