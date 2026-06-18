@@ -242,10 +242,29 @@ def krx_fetch(endpoint, bas_dd):
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_all_stocks():
     bas_dd = recent_biz_day(-1)
+    prev_dd = recent_biz_day(-2)
     rows = []
     for ep in ["/svc/apis/sto/stk_bydd_trd", "/svc/apis/sto/ksq_bydd_trd"]:
-        data = krx_fetch(ep, bas_dd) or krx_fetch(ep, recent_biz_day(-2))
+        data = krx_fetch(ep, bas_dd) or krx_fetch(ep, prev_dd)
         rows.extend(data)
+
+    # 주가지표(PBR·DIV·EPS·BPS) 병합 — KRX 별도 엔드포인트
+    # KRX는 주가지표를 stk_isu_base_info / ksq_isu_base_info 엔드포인트로 제공
+    idx_map: dict = {}
+    for ep in ["/svc/apis/sto/stk_isu_base_info", "/svc/apis/sto/ksq_isu_base_info"]:
+        for r in krx_fetch(ep, bas_dd) or krx_fetch(ep, prev_dd) or []:
+            cd = str(r.get("ISU_CD","") or r.get("ISU_SRT_CD","")).zfill(6)[:6]
+            if cd:
+                idx_map[cd] = r
+    if idx_map:
+        for row in rows:
+            cd = str(row.get("ISU_CD","")).zfill(6)[:6]
+            extra = idx_map.get(cd, {})
+            # 기존 키를 덮어쓰지 않고 없는 키만 추가
+            for k, v in extra.items():
+                if k not in row:
+                    row[k] = v
+
     return rows, bas_dd
 
 def normalize_stocks(raw):
@@ -260,11 +279,21 @@ def normalize_stocks(raw):
         chg  = to_num(row.get("FLUC_RT")   or row.get("fltRt"))
         mc   = to_num(row.get("MKTCAP")     or row.get("mrktTotAmt"))
         shr  = to_num(row.get("LIST_SHRS")  or row.get("lstgStCnt"))
-        eps = to_num(row.get("EPS")  or row.get("eps"))
-        bps = to_num(row.get("BPS")  or row.get("bps"))
-        div = to_num(row.get("DIV")  or row.get("div"))   # 배당수익률(%)
-        dps = to_num(row.get("DPS")  or row.get("dps"))   # 주당배당금
-        pbr = round(close / bps, 2) if (bps and bps > 0 and close > 0) else None
+        # KRX 필드명은 버전별로 상이 — 다수 변형 시도
+        eps = to_num(row.get("EPS") or row.get("eps") or row.get("EPS_VAL") or 0)
+        bps = to_num(row.get("BPS") or row.get("bps") or row.get("BPS_VAL") or 0)
+        # DIV: 배당수익률(%) — 필드명 변형 다수 시도
+        div = to_num(row.get("DIV") or row.get("div") or row.get("DIV_YLD")
+                     or row.get("dvdRt") or row.get("DIV_RT") or 0)
+        dps = to_num(row.get("DPS") or row.get("dps") or row.get("DPS_VAL") or 0)
+        # PBR: KRX 직접 제공 시 사용, 없으면 현재가/BPS 계산
+        pbr_krx = to_num(row.get("PBR") or row.get("pbr") or row.get("PBR_VAL") or 0)
+        if pbr_krx > 0:
+            pbr = round(pbr_krx, 2)
+        elif bps > 0 and close > 0:
+            pbr = round(close / bps, 2)
+        else:
+            pbr = None
         if not code or not name:
             continue
         result.append({"code":code,"name":name,
@@ -411,8 +440,8 @@ def get_ye_mktcap(stock_code, year):
 # ─────────────────────────────────────────────────────────────
 # 우량주 재무 요약 (DART 스크리닝용)
 # ─────────────────────────────────────────────────────────────
-def get_quality_metrics(raw_fin):
-    """DART 재무데이터 → ROE·부채비율·영업이익률 (스케일 무관 비율 계산)"""
+def get_quality_metrics(raw_fin, close: float = 0, shares: float = 0):
+    """DART 재무데이터 → ROE·부채비율·영업이익률·PBR·DIV 계산"""
     if not raw_fin:
         return {}
     yr = max(raw_fin.keys())
@@ -423,12 +452,28 @@ def get_quality_metrics(raw_fin):
     net    = d.get("net_income",   0) or 0
     eq     = d.get("equity",       0) or 0
     assets = d.get("total_assets", 0) or 0
+    divs   = d.get("dividends",    0) or 0  # 현금배당 (CF)
     if rev and op_inc:
         rv["op_margin"]  = round(op_inc / rev * 100, 1)
     if net and eq and abs(eq) > 0:
         rv["roe"]        = round(net / abs(eq) * 100, 1)
     if assets > 0 and eq > 0:
         rv["debt_ratio"] = round((assets - eq) / eq * 100, 0)
+    # PBR: 현재가 / BPS (BPS = equity * scale / shares)
+    if close > 0 and shares > 0 and eq > 0:
+        for scale in [1, 1_000, 1_000_000, 100_000_000]:
+            bps_val = abs(eq) * scale / shares
+            if bps_val > 0 and 0.05 <= close / bps_val <= 100:
+                rv["pbr_dart"] = round(close / bps_val, 2)
+                break
+    # DIV: 배당금 / 시가총액 (시가총액 = close * shares)
+    if close > 0 and shares > 0 and divs:
+        mktcap = close * shares
+        for scale in [1, 1_000, 1_000_000]:
+            div_pct = abs(divs) * scale / mktcap * 100
+            if 0.01 <= div_pct <= 30:
+                rv["div_dart"] = round(div_pct, 2)
+                break
     return rv
 
 # ─────────────────────────────────────────────────────────────
@@ -852,9 +897,16 @@ def main():
                              if s["code"] not in dart_data]
             if codes_to_load:
                 prog = st.progress(0, text=f"DART 재무 조회 중... 0/{len(codes_to_load)}")
+                # code → stock 빠른 조회
+                stock_lookup = {s["code"]: s for s in filtered}
                 for i, code in enumerate(codes_to_load):
-                    raw = fetch_dart_financials(code)
-                    dart_data[code] = get_quality_metrics(raw)
+                    raw  = fetch_dart_financials(code)
+                    stk  = stock_lookup.get(code, {})
+                    dart_data[code] = get_quality_metrics(
+                        raw,
+                        close=stk.get("close", 0),
+                        shares=stk.get("shares", 0),
+                    )
                     prog.progress((i+1)/len(codes_to_load),
                                   text=f"DART 재무 조회 중... {i+1}/{len(codes_to_load)}")
                 st.session_state["dart_data"] = dart_data
@@ -1005,8 +1057,13 @@ def main():
             "시가총액(억)": fmt_mktcap_eok(s["mktcap"]) if s.get("mktcap") else 0,
         }
         if quality_mode:
-            row["PBR"]    = s.get("pbr") if s.get("pbr") else None
-            row["DIV(%)"] = round(s["div"], 1) if s.get("div") else None
+            dm_tmp = dart_data.get(s["code"], {})
+            # PBR: KRX 직접값 우선, 없으면 DART 계산값
+            pbr_val = s.get("pbr") or dm_tmp.get("pbr_dart")
+            row["PBR"]    = round(pbr_val, 2) if pbr_val else None
+            # DIV: KRX 직접값 우선, 없으면 DART 계산값
+            div_val = (s.get("div") or 0) or dm_tmp.get("div_dart")
+            row["DIV(%)"] = round(div_val, 2) if div_val else None
             dm = dart_data.get(s["code"], {})
             if dm:
                 row["ROE(%)"]  = dm.get("roe")
