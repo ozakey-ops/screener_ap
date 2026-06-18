@@ -244,7 +244,7 @@ def krx_fetch(endpoint, bas_dd):
 # ─────────────────────────────────────────────────────────────
 # 종목 데이터
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=0, show_spinner=False)
 def get_all_stocks():
     bas_dd = recent_biz_day(-1)
     prev_dd = recent_biz_day(-2)
