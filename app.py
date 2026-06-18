@@ -459,13 +459,20 @@ def get_quality_metrics(raw_fin, close: float = 0, shares: float = 0):
         rv["roe"]        = round(net / abs(eq) * 100, 1)
     if assets > 0 and eq > 0:
         rv["debt_ratio"] = round((assets - eq) / eq * 100, 0)
-    # PBR: 현재가 / BPS (BPS = equity * scale / shares)
+    # 재무 스케일 감지 (equity → BPS 역산)
+    fin_scale = 1_000_000  # 기본값: 백만원 단위
     if close > 0 and shares > 0 and eq > 0:
         for scale in [1, 1_000, 1_000_000, 100_000_000]:
             bps_val = abs(eq) * scale / shares
             if bps_val > 0 and 0.05 <= close / bps_val <= 100:
+                fin_scale = scale
                 rv["pbr_dart"] = round(close / bps_val, 2)
                 break
+    # 영업이익·배당금 (억원)
+    if op_inc:
+        rv["op_income_eok"] = round(op_inc * fin_scale / 1e8)
+    if divs:
+        rv["dividends_eok"] = round(abs(divs) * fin_scale / 1e8)
     # DIV: 배당금 / 시가총액 (시가총액 = close * shares)
     if close > 0 and shares > 0 and divs:
         mktcap = close * shares
@@ -827,11 +834,11 @@ def main():
         st.markdown('<div class="quality-panel">', unsafe_allow_html=True)
         qa, qb, qc = st.columns([2, 2, 0.8])
         with qa:
-            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=100000,
-                value=(0, 100000), step=500, help="시가총액 범위 (억원)")
+            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=100_000_000,
+                value=(0, 100_000_000), step=10_000, help="시가총액 범위 (억원)")
         with qb:
-            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=1000,
-                value=(0, 1000), step=5, help="일 거래대금 범위 (억원)")
+            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=100_000_000,
+                value=(0, 100_000_000), step=10_000, help="일 거래대금 범위 (억원)")
         with qc:
             req_profit = st.checkbox("흑자(EPS>0)", value=True)
         qd, qe = st.columns([1, 1])
@@ -1020,13 +1027,36 @@ def main():
     })();
     </script>
     """
-    col_count, col_btn = st.columns([6, 1])
+    col_count, col_dart_btn, col_btn = st.columns([5, 1, 1])
     with col_count:
         st.markdown(f'<div class="tv-count" style="padding-top:6px">🔎 {len(filtered):,}개 종목 표시</div>',
                     unsafe_allow_html=True)
+    with col_dart_btn:
+        main_dart_load = st.button("📊 재무 로드",
+            help="표시 종목의 DART 재무 데이터(영업이익·배당금) 조회")
     with col_btn:
         st.components.v1.html(_scroll_btn, height=36)
     st.components.v1.html(_cb_hide, height=0)
+
+    # 메인 뷰 DART 로드
+    if main_dart_load:
+        codes_to_load = [s["code"] for s in filtered if s["code"] not in dart_data]
+        if len(filtered) > 500:
+            st.warning(f"⚠️ {len(filtered):,}개는 너무 많습니다. 필터로 500개 이하로 줄여주세요.")
+        elif codes_to_load:
+            prog = st.progress(0, text=f"DART 조회 중... 0/{len(codes_to_load)}")
+            stock_lookup = {s["code"]: s for s in filtered}
+            for i, code in enumerate(codes_to_load):
+                raw  = fetch_dart_financials(code)
+                stk  = stock_lookup.get(code, {})
+                dart_data[code] = get_quality_metrics(
+                    raw, close=stk.get("close", 0), shares=stk.get("shares", 0))
+                prog.progress((i+1)/len(codes_to_load),
+                    text=f"DART 조회 중... {i+1}/{len(codes_to_load)}")
+            st.session_state["dart_data"] = dart_data
+            prog.empty()
+        else:
+            st.toast("✅ 이미 로드됨")
 
     # ── 종목 테이블 ──
     if not filtered:
@@ -1061,6 +1091,10 @@ def main():
                            round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
             "거래량(주)": int(s["volume"]) if s["volume"] else 0,
             "시가총액(억)": fmt_mktcap_eok(s["mktcap"]) if s.get("mktcap") else 0,
+            "주식수(주)":   int(s["shares"]) if s.get("shares") else None,
+            "영업이익(억)": dart_data.get(s["code"], {}).get("op_income_eok"),
+            "배당금(억)":   dart_data.get(s["code"], {}).get("dividends_eok"),
+            "EPS(원)":      int(s["eps"]) if s.get("eps") else None,
         }
         if quality_mode:
             dm_tmp = dart_data.get(s["code"], {})
@@ -1086,6 +1120,10 @@ def main():
         "거래대금(억)": st.column_config.NumberColumn(format="%,.1f억"),
         "거래량(주)":   st.column_config.NumberColumn(format="%,d"),
         "시가총액(억)": st.column_config.NumberColumn(format="%,d억"),
+        "주식수(주)":   st.column_config.NumberColumn(format="%,d"),
+        "영업이익(억)": st.column_config.NumberColumn(format="%,d억"),
+        "배당금(억)":   st.column_config.NumberColumn(format="%,d억"),
+        "EPS(원)":      st.column_config.NumberColumn(format="%,d"),
     }
     if quality_mode:
         col_cfg["PBR"]      = st.column_config.NumberColumn(format="%.2f")
