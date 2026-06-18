@@ -164,20 +164,23 @@ st.markdown("""
     align-items: center !important;
     gap: 0 !important;
   }
-  /* 라디오 컬럼: 나머지 공간 차지 → 체크박스 오른쪽으로 밀기 */
+  /* 라디오 컬럼: 남은 공간 모두 차지 → 3개 오른쪽 끝으로 밀기 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
     > [data-testid="stColumn"]:first-child {
     flex: 1 1 auto !important;
     min-width: 0 !important;
     padding-bottom: 0 !important;
   }
-  /* 체크박스 컬럼(2번째~): 내용 폭에 맞게, 오른쪽 배치 */
+  /* 오른쪽 3개 컬럼: 동일 폭 100px, 내용 중앙 정렬 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
     > [data-testid="stColumn"]:not(:first-child) {
-    flex: 0 0 auto !important;
-    width: fit-content !important;
+    flex: 0 0 100px !important;
+    width: 100px !important;
     min-width: 0 !important;
     padding-bottom: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
   /* 라디오/체크박스 자체 여백 제거 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
@@ -889,7 +892,7 @@ def main():
     """
 
     # ── 필터 Row: 시장(왼쪽) | 우선·스팩 제외 · 필터 · 맨위로 (오른쪽, 균등 배치) ──
-    mkt_col, excl_col, qual_col, btn_col = st.columns([3, 1, 1, 1])
+    mkt_col, excl_col, qual_col, btn_col = st.columns([6, 1, 1, 1])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
