@@ -304,6 +304,49 @@ def normalize_stocks(raw):
     return result
 
 # ─────────────────────────────────────────────────────────────
+# yfinance 데이터 (영업이익·EPS·PER·PBR·ROE)
+# ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_yf_data(code: str, market: str) -> dict:
+    try:
+        import yfinance as yf
+    except ImportError:
+        return {}
+    try:
+        suffix = ".KS" if market == "KOSPI" else ".KQ"
+        t    = yf.Ticker(code + suffix)
+        info = t.info or {}
+        if not info or info.get("quoteType") in (None, "NONE", ""):
+            return {}
+        rv: dict = {}
+        eps = info.get("trailingEps")
+        if eps is not None:
+            rv["eps"] = round(float(eps))
+        per = info.get("trailingPE")
+        if per and 0 < float(per) < 1000:
+            rv["per"] = round(float(per), 1)
+        pbr = info.get("priceToBook")
+        if pbr and 0 < float(pbr) < 200:
+            rv["pbr"] = round(float(pbr), 2)
+        roe = info.get("returnOnEquity")
+        if roe is not None:
+            rv["roe"] = round(float(roe) * 100, 1)
+        try:
+            fin = t.financials
+            if fin is not None and not fin.empty:
+                for lbl in ["Operating Income", "EBIT"]:
+                    if lbl in fin.index:
+                        v = fin.loc[lbl].iloc[0]
+                        if v is not None and not pd.isna(v) and v != 0:
+                            rv["op_income_eok"] = round(float(v) / 1e8)
+                            break
+        except Exception:
+            pass
+        return rv
+    except Exception:
+        return {}
+
+# ─────────────────────────────────────────────────────────────
 # DART 코드 맵
 # ─────────────────────────────────────────────────────────────
 def _dart_session():
@@ -1032,28 +1075,25 @@ def main():
         st.markdown(f'<div class="tv-count" style="padding-top:6px">🔎 {len(filtered):,}개 종목 표시</div>',
                     unsafe_allow_html=True)
     with col_dart_btn:
-        main_dart_load = st.button("📊 재무 로드",
-            help="표시 종목의 DART 재무 데이터(영업이익·배당금) 조회")
+        yf_load = st.button("📈 재무 로드",
+            help="yfinance로 영업이익·EPS·PER·PBR·ROE 조회")
     with col_btn:
         st.components.v1.html(_scroll_btn, height=36)
     st.components.v1.html(_cb_hide, height=0)
 
-    # 메인 뷰 DART 로드
-    if main_dart_load:
-        codes_to_load = [s["code"] for s in filtered if s["code"] not in dart_data]
-        if len(filtered) > 500:
-            st.warning(f"⚠️ {len(filtered):,}개는 너무 많습니다. 필터로 500개 이하로 줄여주세요.")
-        elif codes_to_load:
-            prog = st.progress(0, text=f"DART 조회 중... 0/{len(codes_to_load)}")
-            stock_lookup = {s["code"]: s for s in filtered}
-            for i, code in enumerate(codes_to_load):
-                raw  = fetch_dart_financials(code)
-                stk  = stock_lookup.get(code, {})
-                dart_data[code] = get_quality_metrics(
-                    raw, close=stk.get("close", 0), shares=stk.get("shares", 0))
-                prog.progress((i+1)/len(codes_to_load),
-                    text=f"DART 조회 중... {i+1}/{len(codes_to_load)}")
-            st.session_state["dart_data"] = dart_data
+    # 메인 뷰 yfinance 로드
+    yf_data: dict = st.session_state.get("yf_data", {})
+    if yf_load:
+        pairs = [(s["code"], s["market"]) for s in filtered if s["code"] not in yf_data]
+        if len(filtered) > 300:
+            st.warning(f"⚠️ {len(filtered):,}개는 너무 많습니다. 300개 이하로 필터링 후 시도해 주세요.")
+        elif pairs:
+            prog = st.progress(0, text=f"yfinance 조회 중... 0/{len(pairs)}")
+            for i, (code, mkt) in enumerate(pairs):
+                yf_data[code] = fetch_yf_data(code, mkt)
+                prog.progress((i+1)/len(pairs),
+                    text=f"yfinance 조회 중... {i+1}/{len(pairs)}")
+            st.session_state["yf_data"] = yf_data
             prog.empty()
         else:
             st.toast("✅ 이미 로드됨")
@@ -1092,9 +1132,12 @@ def main():
             "거래량(주)": int(s["volume"]) if s["volume"] else 0,
             "시가총액(억)": fmt_mktcap_eok(s["mktcap"]) if s.get("mktcap") else 0,
             "주식수(주)":   int(s["shares"]) if s.get("shares") else None,
-            "영업이익(억)": dart_data.get(s["code"], {}).get("op_income_eok"),
-            "배당금(억)":   dart_data.get(s["code"], {}).get("dividends_eok"),
-            "EPS(원)":      int(s["eps"]) if s.get("eps") else None,
+            "영업이익(억)": yf_data.get(s["code"], {}).get("op_income_eok"),
+            "EPS(원)":      (yf_data.get(s["code"], {}).get("eps")
+                             or (int(s["eps"]) if s.get("eps") else None)),
+            "PER":          yf_data.get(s["code"], {}).get("per"),
+            "PBR":          yf_data.get(s["code"], {}).get("pbr"),
+            "ROE(%)":       yf_data.get(s["code"], {}).get("roe"),
         }
         if quality_mode:
             dm_tmp = dart_data.get(s["code"], {})
@@ -1122,8 +1165,10 @@ def main():
         "시가총액(억)": st.column_config.NumberColumn(format="%,d억"),
         "주식수(주)":   st.column_config.NumberColumn(format="%,d"),
         "영업이익(억)": st.column_config.NumberColumn(format="%,d억"),
-        "배당금(억)":   st.column_config.NumberColumn(format="%,d억"),
         "EPS(원)":      st.column_config.NumberColumn(format="%,d"),
+        "PER":          st.column_config.NumberColumn(format="%.1f"),
+        "PBR":          st.column_config.NumberColumn(format="%.2f"),
+        "ROE(%)":       st.column_config.NumberColumn(format="%.1f%%"),
     }
     if quality_mode:
         col_cfg["PBR"]      = st.column_config.NumberColumn(format="%.2f")
