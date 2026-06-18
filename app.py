@@ -831,10 +831,10 @@ def main():
     <style>
       body{margin:0;background:transparent;}
       #gtb{
-        display:flex;align-items:center;justify-content:center;gap:6px;
-        width:100%;padding:5px 0;border:none;border-radius:20px;cursor:pointer;
-        background:rgba(26,111,232,.85);color:#fff;font-size:13px;font-weight:600;
-        box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;
+        display:inline-flex;align-items:center;gap:4px;
+        padding:3px 8px;border:none;border-radius:12px;cursor:pointer;
+        background:rgba(26,111,232,.85);color:#fff;font-size:11px;font-weight:600;
+        box-shadow:0 1px 4px rgba(0,0,0,.15);white-space:nowrap;
       }
       #gtb:hover{background:rgba(20,88,192,.9);}
     </style>
