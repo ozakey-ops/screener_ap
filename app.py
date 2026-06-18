@@ -93,8 +93,18 @@ st.markdown("""
   div[data-testid="stDataFrame"] td {
     text-align: center !important;
   }
-  /* glide-data-grid 렌더 방식 */
-  div[data-testid="stDataFrame"] [role="columnheader"],
+  /* glide-data-grid 헤더 가운데 */
+  div[data-testid="stDataFrame"] [role="columnheader"] {
+    justify-content: center !important;
+    text-align: center !important;
+    align-items: center !important;
+  }
+  div[data-testid="stDataFrame"] [role="columnheader"] > * {
+    justify-content: center !important;
+    text-align: center !important;
+    width: 100% !important;
+  }
+  /* glide-data-grid 셀 */
   div[data-testid="stDataFrame"] [role="gridcell"] {
     justify-content: center !important;
     text-align: center !important;
@@ -106,7 +116,7 @@ st.markdown("""
     justify-content: center !important;
     text-align: center !important;
   }
-  /* 시가총액(조)(8번째 열) — NumberColumn이므로 기본 오른쪽 정렬 */
+  /* 시가총액(8번째 열) 오른쪽 정렬 */
   div[data-testid="stDataFrame"] [aria-colindex="8"] {
     justify-content: flex-end !important;
     text-align: right !important;
@@ -768,30 +778,31 @@ def main():
     _scroll_btn = """
     <style>
       body{margin:0;background:transparent;}
-      button{
+      #gtb{
         display:flex;align-items:center;gap:6px;
         padding:5px 14px;border:none;border-radius:20px;cursor:pointer;
         background:rgba(26,111,232,.85);color:#fff;font-size:13px;font-weight:600;
         box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;
       }
-      button:hover{background:rgba(20,88,192,.9);}
+      #gtb:hover{background:rgba(20,88,192,.9);}
     </style>
-    <button onclick="
+    <script>
+    function goTop(){
       var pd=window.parent.document;
-      var sel=['section[data-testid=\"stMain\"]',
-               'div[data-testid=\"stMainBlockContainer\"]',
-               '.main','section.main',
-               'div[data-testid=\"stAppViewContainer\"]'];
-      var scrolled=false;
-      for(var i=0;i<sel.length;i++){
-        var el=pd.querySelector(sel[i]);
+      var targets=['section[data-testid="stMain"]',
+                   'div[data-testid="stMainBlockContainer"]',
+                   'section.main','.main',
+                   'div[data-testid="stAppViewContainer"]'];
+      for(var i=0;i<targets.length;i++){
+        var el=pd.querySelector(targets[i]);
         if(el&&el.scrollHeight>el.clientHeight){
-          el.scrollTo({top:0,behavior:'smooth'});
-          scrolled=true;break;
+          el.scrollTo({top:0,behavior:"smooth"});return;
         }
       }
-      if(!scrolled){window.parent.scrollTo({top:0,behavior:'smooth'});}
-    ">▲ 맨 위로</button>
+      window.parent.scrollTo({top:0,behavior:"smooth"});
+    }
+    </script>
+    <button id="gtb" onclick="goTop()">&#9650; 맨 위로</button>
     """
     _cb_hide = """
     <script>
@@ -829,7 +840,7 @@ def main():
           el.style.justifyContent='center';
           el.style.textAlign='center';
         });
-        /* 시가총액(조)(8번째 열) 오른쪽 정렬 */
+        /* 시가총액(8번째 열) 오른쪽 정렬 시도 */
         p.document.querySelectorAll(
           'div[data-testid="stDataFrame"] [aria-colindex="8"]'
         ).forEach(function(el){
@@ -867,7 +878,7 @@ def main():
         "거래대금(억)": round(s["tval"] / 1e8, 1) if s.get("tval") else
                         round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
         "거래량(주)": int(s["volume"]) if s["volume"] else 0,
-        "시가총액(조)": round(s["mktcap"] / 1e12, 2) if s.get("mktcap") else 0.0,
+        "시가총액": fmt_mktcap(s["mktcap"]) if s.get("mktcap") else "-",
     } for s in filtered])
 
     event = st.dataframe(
@@ -879,7 +890,7 @@ def main():
             "현재가(원)": st.column_config.NumberColumn(format="%,d"),
             "거래대금(억)": st.column_config.NumberColumn(format="%,.1f억"),
             "거래량(주)": st.column_config.NumberColumn(format="%,d"),
-            "시가총액(조)": st.column_config.NumberColumn(format="%,.2f조"),
+
         }
     )
 
