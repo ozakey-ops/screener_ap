@@ -159,13 +159,21 @@ st.markdown("""
   }
 
 
-  /* ── 필터 행: 라디오+체크박스 수직 중앙 정렬 + 컨텐츠 너비 밀착 ── */
+  /* ── 필터 행: 라디오 왼쪽·체크박스 오른쪽 정렬 ── */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"]) {
     align-items: center !important;
     gap: 0 !important;
   }
+  /* 라디오 컬럼: 나머지 공간 차지 → 체크박스 오른쪽으로 밀기 */
   [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
-    > [data-testid="stColumn"] {
+    > [data-testid="stColumn"]:first-child {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  /* 체크박스 컬럼(2번째~): 내용 폭에 맞게, 오른쪽 배치 */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stRadio"])
+    > [data-testid="stColumn"]:not(:first-child) {
     flex: 0 0 auto !important;
     width: fit-content !important;
     min-width: 0 !important;
@@ -302,49 +310,6 @@ def normalize_stocks(raw):
             "chg_rt":chg,"mktcap":mc,"shares":shr,
             "eps":eps,"bps":bps,"div":div,"dps":dps,"pbr":pbr})
     return result
-
-# ─────────────────────────────────────────────────────────────
-# yfinance 데이터 (영업이익·EPS·PER·PBR·ROE)
-# ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_yf_data(code: str, market: str) -> dict:
-    try:
-        import yfinance as yf
-    except ImportError:
-        return {}
-    try:
-        suffix = ".KS" if market == "KOSPI" else ".KQ"
-        t    = yf.Ticker(code + suffix)
-        info = t.info or {}
-        if not info or info.get("quoteType") in (None, "NONE", ""):
-            return {}
-        rv: dict = {}
-        eps = info.get("trailingEps")
-        if eps is not None:
-            rv["eps"] = round(float(eps))
-        per = info.get("trailingPE")
-        if per and 0 < float(per) < 1000:
-            rv["per"] = round(float(per), 1)
-        pbr = info.get("priceToBook")
-        if pbr and 0 < float(pbr) < 200:
-            rv["pbr"] = round(float(pbr), 2)
-        roe = info.get("returnOnEquity")
-        if roe is not None:
-            rv["roe"] = round(float(roe) * 100, 1)
-        try:
-            fin = t.financials
-            if fin is not None and not fin.empty:
-                for lbl in ["Operating Income", "EBIT"]:
-                    if lbl in fin.index:
-                        v = fin.loc[lbl].iloc[0]
-                        if v is not None and not pd.isna(v) and v != 0:
-                            rv["op_income_eok"] = round(float(v) / 1e8)
-                            break
-        except Exception:
-            pass
-        return rv
-    except Exception:
-        return {}
 
 # ─────────────────────────────────────────────────────────────
 # DART 코드 맵
@@ -869,28 +834,22 @@ def main():
     with excl_col:
         excl = st.checkbox("우선·스팩 제외")
     with qual_col:
-        quality_mode = st.checkbox("🏆 우량주")
+        quality_mode = st.checkbox("🔧 필터")
     sort_by = "시가총액"
 
     # ── 우량주 조건 패널 ──
     if quality_mode:
         st.markdown('<div class="quality-panel">', unsafe_allow_html=True)
-        qa, qb, qc = st.columns([2, 2, 0.8])
+        qa, qb, qc = st.columns([2, 2, 2])
         with qa:
-            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=100_000_000,
-                value=(0, 100_000_000), step=10_000, help="시가총액 범위 (억원)")
+            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=30_000_000,
+                value=(0, 30_000_000), step=10_000, help="시가총액 범위 (억원)")
         with qb:
-            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=100_000_000,
-                value=(0, 100_000_000), step=10_000, help="일 거래대금 범위 (억원)")
+            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=1_000_000,
+                value=(0, 1_000_000), step=1_000, help="일 거래대금 범위 (억원)")
         with qc:
-            req_profit = st.checkbox("흑자(EPS>0)", value=True)
-        qd, qe = st.columns([1, 1])
-        with qd:
-            div_range = st.slider("배당수익률(%)", min_value=0.0, max_value=15.0,
-                value=(0.0, 15.0), step=0.5, help="배당수익률 범위 (%)")
-        with qe:
-            pbr_range = st.slider("PBR", min_value=0.0, max_value=30.0,
-                value=(0.0, 30.0), step=0.5, help="PBR 범위 (없는 종목은 통과)")
+            chg_range = st.slider("등락률(%)", min_value=-30.0, max_value=30.0,
+                value=(-30.0, 30.0), step=0.5, help="등락률 범위 (%)")
         st.markdown('</div>', unsafe_allow_html=True)
 
         # DART 심화 필터 expander
@@ -924,19 +883,9 @@ def main():
             tv = (s.get("tval") or 0) / 1e8
             if not (tval_range[0] <= tv <= tval_range[1]):
                 return False
-            if req_profit and (s.get("eps") or 0) <= 0:
+            chg = s.get("chg_rt") or 0
+            if not (chg_range[0] <= chg <= chg_range[1]):
                 return False
-            div = s.get("div") or 0
-            if div_range[0] > 0 and div < div_range[0]:
-                return False
-            if div_range[1] < 15.0 and div > div_range[1]:
-                return False
-            pbr = s.get("pbr")
-            if pbr is not None:
-                if pbr_range[0] > 0 and pbr < pbr_range[0]:
-                    return False
-                if pbr_range[1] < 30.0 and pbr > pbr_range[1]:
-                    return False
             return True
         filtered = [s for s in filtered if _krx_ok(s)]
 
@@ -1070,33 +1019,14 @@ def main():
     })();
     </script>
     """
-    col_count, col_dart_btn, col_btn = st.columns([5, 1, 1])
+    col_count, col_btn = st.columns([6, 1])
     with col_count:
         st.markdown(f'<div class="tv-count" style="padding-top:6px">🔎 {len(filtered):,}개 종목 표시</div>',
                     unsafe_allow_html=True)
-    with col_dart_btn:
-        yf_load = st.button("📈 재무 로드",
-            help="yfinance로 영업이익·EPS·PER·PBR·ROE 조회")
     with col_btn:
         st.components.v1.html(_scroll_btn, height=36)
     st.components.v1.html(_cb_hide, height=0)
 
-    # 메인 뷰 yfinance 로드
-    yf_data: dict = st.session_state.get("yf_data", {})
-    if yf_load:
-        pairs = [(s["code"], s["market"]) for s in filtered if s["code"] not in yf_data]
-        if len(filtered) > 300:
-            st.warning(f"⚠️ {len(filtered):,}개는 너무 많습니다. 300개 이하로 필터링 후 시도해 주세요.")
-        elif pairs:
-            prog = st.progress(0, text=f"yfinance 조회 중... 0/{len(pairs)}")
-            for i, (code, mkt) in enumerate(pairs):
-                yf_data[code] = fetch_yf_data(code, mkt)
-                prog.progress((i+1)/len(pairs),
-                    text=f"yfinance 조회 중... {i+1}/{len(pairs)}")
-            st.session_state["yf_data"] = yf_data
-            prog.empty()
-        else:
-            st.toast("✅ 이미 로드됨")
 
     # ── 종목 테이블 ──
     if not filtered:
@@ -1131,13 +1061,7 @@ def main():
                            round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
             "거래량(주)": int(s["volume"]) if s["volume"] else 0,
             "시가총액(억)": fmt_mktcap_eok(s["mktcap"]) if s.get("mktcap") else 0,
-            "주식수(주)":   int(s["shares"]) if s.get("shares") else None,
-            "영업이익(억)": yf_data.get(s["code"], {}).get("op_income_eok"),
-            "EPS(원)":      (yf_data.get(s["code"], {}).get("eps")
-                             or (int(s["eps"]) if s.get("eps") else None)),
-            "PER":          yf_data.get(s["code"], {}).get("per"),
-            "PBR":          yf_data.get(s["code"], {}).get("pbr"),
-            "ROE(%)":       yf_data.get(s["code"], {}).get("roe"),
+
         }
         if quality_mode:
             dm_tmp = dart_data.get(s["code"], {})
@@ -1163,12 +1087,7 @@ def main():
         "거래대금(억)": st.column_config.NumberColumn(format="%,.1f억"),
         "거래량(주)":   st.column_config.NumberColumn(format="%,d"),
         "시가총액(억)": st.column_config.NumberColumn(format="%,d억"),
-        "주식수(주)":   st.column_config.NumberColumn(format="%,d"),
-        "영업이익(억)": st.column_config.NumberColumn(format="%,d억"),
-        "EPS(원)":      st.column_config.NumberColumn(format="%,d"),
-        "PER":          st.column_config.NumberColumn(format="%.1f"),
-        "PBR":          st.column_config.NumberColumn(format="%.2f"),
-        "ROE(%)":       st.column_config.NumberColumn(format="%.1f%%"),
+
     }
     if quality_mode:
         col_cfg["PBR"]      = st.column_config.NumberColumn(format="%.2f")
