@@ -52,17 +52,7 @@ st.markdown("""
   .tv-logo span { color:#1a6fe8; }
   .tv-date { font-size:11px; color:#9da3b4; margin-left:auto; white-space:nowrap; }
 
-  /* ── 필터 바 ── */
-  /* ── 필터 조건 카드 ── */
-  .quality-panel {
-    background:#ffffff; border:1px solid #dde1ec; border-radius:14px;
-    padding:18px 22px; margin-bottom:12px;
-    box-shadow:0 2px 10px rgba(0,0,0,.07);
-  }
 
-
-  /* ── 종목 수 ── */
-  .tv-count { font-size:12px; color:#5d6278; padding:4px 0 6px; }
 
   /* ── 지표 카드 ── */
   .metric-card {
@@ -804,10 +794,6 @@ def main():
         show_detail(st.session_state["selected"])
         return
 
-    # ── 헤더 ──
-    search = st.text_input("검색", placeholder="🔍  종목명 또는 코드 검색...",
-                            label_visibility="collapsed")
-
     # ── 데이터 로드 ──
     with st.spinner("KRX 데이터 수집 중..."):
         try:
@@ -895,33 +881,36 @@ def main():
     </script>
     """
 
-    # ── 필터 Row: 시장(왼쪽) | 우선·스팩 제외 · 필터 · 맨위로 (오른쪽, 균등 배치) ──
-    mkt_col, excl_col, qual_col = st.columns([4, 1.5, 1])
+    # ── 필터 Row: 시장 | ▲ 맨위로 | 우선·스팩 제외 | 🔧 필터 ──
+    mkt_col, btn_col, excl_col, qual_col = st.columns([4, 0.9, 1.5, 0.9])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
+    with btn_col:
+        st.components.v1.html(_scroll_btn, height=30)
     with excl_col:
         excl = st.checkbox("우선·스팩 제외")
     with qual_col:
         quality_mode = st.checkbox("🔧 필터")
-    sort_by = "시가총액"
 
-    # ── 우량주 조건 패널 ──
+    # ── 검색 + 슬라이더 카드 ──
+    with st.container(border=True):
+        search = st.text_input("검색", placeholder="🔍  종목명 또는 코드 검색...",
+                                label_visibility="collapsed")
+        if quality_mode:
+            qa, qb, qc = st.columns([2, 2, 2])
+            with qa:
+                mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=30_000_000,
+                    value=(0, 30_000_000), step=10_000, help="시가총액 범위 (억원)")
+            with qb:
+                tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=1_000_000,
+                    value=(0, 1_000_000), step=1_000, help="일 거래대금 범위 (억원)")
+            with qc:
+                chg_range = st.slider("등락률(%)", min_value=-30.0, max_value=30.0,
+                    value=(-30.0, 30.0), step=0.5, help="등락률 범위 (%)")
+
+    # ── DART 심화 필터 ──
     if quality_mode:
-        st.markdown('<div class="quality-panel">', unsafe_allow_html=True)
-        qa, qb, qc = st.columns([2, 2, 2])
-        with qa:
-            mktcap_range = st.slider("시가총액(억)", min_value=0, max_value=30_000_000,
-                value=(0, 30_000_000), step=10_000, help="시가총액 범위 (억원)")
-        with qb:
-            tval_range = st.slider("거래대금(억/일)", min_value=0, max_value=1_000_000,
-                value=(0, 1_000_000), step=1_000, help="일 거래대금 범위 (억원)")
-        with qc:
-            chg_range = st.slider("등락률(%)", min_value=-30.0, max_value=30.0,
-                value=(-30.0, 30.0), step=0.5, help="등락률 범위 (%)")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # DART 심화 필터 expander
         with st.expander("📊 DART 심화 필터 (ROE · 부채비율 · 영업이익률)"):
             da, db, dc, dd = st.columns(4)
             with da:
@@ -933,7 +922,6 @@ def main():
             with dd:
                 dart_load = st.button("🔍 DART 로드 & 적용",
                     help="필터된 종목의 DART 재무 데이터를 조회합니다 (최초 1~2분 소요)")
-    # quality_mode=False 시 DART/KRX 필터 변수 미참조 (if quality_mode 가드)
 
     # ── 필터링 ──
     q = search.strip().lower()
@@ -943,7 +931,6 @@ def main():
         and (not excl or (not re.search(r'[0-9]*우[A-Z]?$', s["name"]) and "스팩" not in s["name"]))
     ]
 
-    # KRX 우량주 기본 필터
     if quality_mode:
         def _krx_ok(s):
             mc = (s.get("mktcap") or 0) / 1e8
@@ -960,24 +947,22 @@ def main():
 
     filtered.sort(key=lambda x: x.get("mktcap", 0) or 0, reverse=True)
 
-    # DART 심화 필터 처리
+    # ── DART 심화 필터 처리 ──
     dart_data = st.session_state.get("dart_data", {})
     if quality_mode and dart_load:
         if len(filtered) > 500:
             st.warning(f"⚠️ 현재 {len(filtered):,}개 종목은 DART 조회에 시간이 오래 걸립니다. "
                        "시가총액/거래대금 조건을 높여 500개 이하로 줄인 후 시도해 주세요.")
         else:
-            codes_to_load = [s["code"] for s in filtered
-                             if s["code"] not in dart_data]
+            codes_to_load = [s["code"] for s in filtered if s["code"] not in dart_data]
             if codes_to_load:
                 prog = st.progress(0, text=f"DART 재무 조회 중... 0/{len(codes_to_load)}")
-                # code → stock 빠른 조회
                 stock_lookup = {s["code"]: s for s in filtered}
                 for i, code in enumerate(codes_to_load):
-                    raw  = fetch_dart_financials(code)
-                    stk  = stock_lookup.get(code, {})
+                    raw_f = fetch_dart_financials(code)
+                    stk   = stock_lookup.get(code, {})
                     dart_data[code] = get_quality_metrics(
-                        raw,
+                        raw_f,
                         close=stk.get("close", 0),
                         shares=stk.get("shares", 0),
                     )
@@ -992,7 +977,7 @@ def main():
         def _dart_ok(s):
             m = dart_data.get(s["code"], {})
             if not m:
-                return True  # 데이터 없는 종목은 통과
+                return True
             if min_roe > 0 and m.get("roe", 0) < min_roe:
                 return False
             if max_debt < 999 and m.get("debt_ratio", 0) > max_debt:
@@ -1002,12 +987,8 @@ def main():
             return True
         filtered = [s for s in filtered if _dart_ok(s)]
 
-    # 맨 위로 버튼: 테이블 바로 위 오른쪽
-    _, btn_col = st.columns([5, 1])
-    with btn_col:
-        st.components.v1.html(_scroll_btn, height=30)
+    # ── 체크박스 숨기기 ──
     st.components.v1.html(_cb_hide, height=0)
-
 
     # ── 종목 테이블 ──
     if not filtered:
@@ -1015,7 +996,6 @@ def main():
         return
 
     def _quality_score(s):
-        """조건 충족 개수 계산"""
         score = 0
         if (s.get("mktcap") or 0) >= 3e11:           score += 1
         if (s.get("tval")   or 0) >= 1e9:             score += 1
@@ -1034,15 +1014,14 @@ def main():
     rows_data = []
     for s in filtered:
         row = {
-            "종목명":    s["name"],
-            "시장":      s["market"],
-            "현재가(원)": int(s["close"]) if s["close"] else 0,
-            "등락률(%)": round(s["chg_rt"], 2) if s["chg_rt"] else 0.0,
+            "종목명":     s["name"],
+            "시장":       s["market"],
+            "현재가(원)":  int(s["close"]) if s["close"] else 0,
+            "등락률(%)":  round(s["chg_rt"], 2) if s["chg_rt"] else 0.0,
             "거래대금(억)": round(s["tval"] / 1e8, 1) if s.get("tval") else
                            round(s["close"] * s["volume"] / 1e8, 1) if s["close"] and s["volume"] else 0.0,
-            "거래량(주)": int(s["volume"]) if s["volume"] else 0,
+            "거래량(주)":  int(s["volume"]) if s["volume"] else 0,
             "시가총액(억)": fmt_mktcap_eok(s["mktcap"]) if s.get("mktcap") else 0,
-
         }
         if quality_mode:
             dm = dart_data.get(s["code"], {})
@@ -1060,12 +1039,11 @@ def main():
         "거래대금(억)": st.column_config.NumberColumn(format="%,.1f억"),
         "거래량(주)":   st.column_config.NumberColumn(format="%,d"),
         "시가총액(억)": st.column_config.NumberColumn(format="%,d억"),
-
     }
     if quality_mode:
-        col_cfg["ROE(%)"]   = st.column_config.NumberColumn(format="%.1f%%")
+        col_cfg["ROE(%)"]      = st.column_config.NumberColumn(format="%.1f%%")
         col_cfg["부채비율(%)"] = st.column_config.NumberColumn(format="%.0f%%")
-        col_cfg["점수"] = st.column_config.ProgressColumn(
+        col_cfg["점수"]        = st.column_config.ProgressColumn(
             "우량점수", min_value=0, max_value=MAX_SCORE, format="%d")
 
     event = st.dataframe(
