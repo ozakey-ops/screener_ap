@@ -4,7 +4,7 @@ KRX 주식 스크리너 — Streamlit 버전
 Secrets: KRX_API_KEY / DART_API_KEY
 """
 
-import os, threading, zipfile, io
+import os, threading, zipfile, io, re
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import xml.etree.ElementTree as ET
@@ -826,8 +826,70 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 필터 Row 1: 시장 / 우선스팩 / 우량주 ──
-    mkt_col, excl_col, qual_col = st.columns([3, 1, 1])
+    # ── 스크롤 버튼 HTML ──
+    _scroll_btn = """
+    <style>
+      body{margin:0;background:transparent;}
+      #gtb{
+        display:flex;align-items:center;justify-content:center;gap:6px;
+        width:100%;padding:5px 0;border:none;border-radius:20px;cursor:pointer;
+        background:rgba(26,111,232,.85);color:#fff;font-size:13px;font-weight:600;
+        box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;
+      }
+      #gtb:hover{background:rgba(20,88,192,.9);}
+    </style>
+    <script>
+    function goTop(){
+      var pd=window.parent.document;
+      var df=pd.querySelector('div[data-testid="stDataFrame"]');
+      if(df){
+        var all=df.querySelectorAll('*');
+        for(var i=0;i<all.length;i++){
+          var el=all[i];
+          var st=window.parent.getComputedStyle(el);
+          var ov=st.overflow+' '+st.overflowY;
+          if((ov.indexOf('auto')>=0||ov.indexOf('scroll')>=0)&&el.scrollTop>0){el.scrollTop=0;}
+        }
+        var canvas=df.querySelector('canvas');
+        if(canvas){canvas.dispatchEvent(new Event('scroll'));}
+      }
+      var pageTargets=['section[data-testid="stMain"]','div[data-testid="stMainBlockContainer"]','section.main','.main'];
+      for(var j=0;j<pageTargets.length;j++){
+        var pel=pd.querySelector(pageTargets[j]);
+        if(pel&&pel.scrollHeight>pel.clientHeight){pel.scrollTo({top:0,behavior:'smooth'});break;}
+      }
+      window.parent.scrollTo({top:0,behavior:'smooth'});
+    }
+    </script>
+    <button id="gtb" onclick="goTop()">&#9650; 맨 위로</button>
+    """
+    _cb_hide = """
+    <script>
+    (function(){
+      var p=window.parent;
+      function hideCB(){
+        p.document.querySelectorAll('div[data-testid="stDataFrame"] input[type="checkbox"]').forEach(function(el){
+          el.style.display='none';
+          if(el.parentElement) el.parentElement.style.cssText+='width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;';
+        });
+        p.document.querySelectorAll('div[data-testid="stDataFrame"] [aria-colindex="1"]').forEach(function(el){
+          el.style.cssText+='width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;border:none!important;';
+        });
+      }
+      function centerCells(){
+        p.document.querySelectorAll('div[data-testid="stDataFrame"] [role="columnheader"],'+'div[data-testid="stDataFrame"] [role="gridcell"]').forEach(function(el){
+          el.style.justifyContent='center';el.style.textAlign='center';el.style.alignItems='center';el.style.display='flex';
+        });
+      }
+      hideCB();centerCells();
+      var df=p.document.querySelector('div[data-testid="stDataFrame"]');
+      if(df&&!df._cbo){df._cbo=new MutationObserver(function(){hideCB();centerCells();});df._cbo.observe(df,{subtree:true,childList:true});}
+    })();
+    </script>
+    """
+
+    # ── 필터 Row: 시장(왼쪽) | 우선·스팩 제외 · 필터 · 맨위로 (오른쪽, 균등 배치) ──
+    mkt_col, excl_col, qual_col, btn_col = st.columns([3, 1, 1, 1])
     with mkt_col:
         market = st.radio("시장", ["전체","KOSPI","KOSDAQ"],
                            horizontal=True, label_visibility="collapsed")
@@ -835,6 +897,8 @@ def main():
         excl = st.checkbox("우선·스팩 제외")
     with qual_col:
         quality_mode = st.checkbox("🔧 필터")
+    with btn_col:
+        st.components.v1.html(_scroll_btn, height=36)
     sort_by = "시가총액"
 
     # ── 우량주 조건 패널 ──
@@ -871,7 +935,7 @@ def main():
     filtered = [s for s in stocks
         if (market == "전체" or s["market"] == market)
         and (not q or q in s["name"].lower() or q in s["code"])
-        and (not excl or (not s["name"].endswith("우") and "스팩" not in s["name"]))
+        and (not excl or (not re.search(r'[0-9]*우[A-Z]?$', s["name"]) and "스팩" not in s["name"]))
     ]
 
     # KRX 우량주 기본 필터
@@ -933,98 +997,6 @@ def main():
             return True
         filtered = [s for s in filtered if _dart_ok(s)]
 
-    # ── 위로가기 버튼: 테이블 위 iframe 버튼 (항상 보임) + 체크박스 숨기기 ──
-    _scroll_btn = """
-    <style>
-      body{margin:0;background:transparent;}
-      #gtb{
-        display:flex;align-items:center;gap:6px;
-        padding:5px 14px;border:none;border-radius:20px;cursor:pointer;
-        background:rgba(26,111,232,.85);color:#fff;font-size:13px;font-weight:600;
-        box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;
-      }
-      #gtb:hover{background:rgba(20,88,192,.9);}
-    </style>
-    <script>
-    function goTop(){
-      var pd=window.parent.document;
-      /* 1) 데이터프레임 내부 스크롤러 찾기 */
-      var df=pd.querySelector('div[data-testid="stDataFrame"]');
-      if(df){
-        var all=df.querySelectorAll('*');
-        for(var i=0;i<all.length;i++){
-          var el=all[i];
-          var st=window.parent.getComputedStyle(el);
-          var ov=st.overflow+' '+st.overflowY;
-          if((ov.indexOf('auto')>=0||ov.indexOf('scroll')>=0)&&el.scrollTop>0){
-            el.scrollTop=0;
-          }
-        }
-        /* canvas 기반 그리드: scrollTop 리셋 후 포커스 이벤트로 강제 갱신 */
-        var canvas=df.querySelector('canvas');
-        if(canvas){ canvas.dispatchEvent(new Event('scroll')); }
-      }
-      /* 2) 페이지 자체도 최상단으로 */
-      var pageTargets=['section[data-testid="stMain"]',
-                       'div[data-testid="stMainBlockContainer"]',
-                       'section.main','.main'];
-      for(var j=0;j<pageTargets.length;j++){
-        var pel=pd.querySelector(pageTargets[j]);
-        if(pel&&pel.scrollHeight>pel.clientHeight){
-          pel.scrollTo({top:0,behavior:"smooth"});break;
-        }
-      }
-      window.parent.scrollTo({top:0,behavior:"smooth"});
-    }
-    </script>
-    <button id="gtb" onclick="goTop()">&#9650; 맨 위로</button>
-    """
-    _cb_hide = """
-    <script>
-    (function(){
-      var p=window.parent;
-      function hideCB(){
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] input[type="checkbox"]'
-        ).forEach(function(el){
-          el.style.display='none';
-          if(el.parentElement) el.parentElement.style.cssText+=
-            'width:0!important;min-width:0!important;padding:0!important;overflow:hidden!important;';
-        });
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] [aria-colindex="1"]'
-        ).forEach(function(el){
-          el.style.cssText+='width:0!important;min-width:0!important;'
-            +'padding:0!important;overflow:hidden!important;border:none!important;';
-        });
-      }
-      function centerCells(){
-        p.document.querySelectorAll(
-          'div[data-testid="stDataFrame"] [role="columnheader"],'
-          +'div[data-testid="stDataFrame"] [role="gridcell"]'
-        ).forEach(function(el){
-          el.style.justifyContent='center';
-          el.style.textAlign='center';
-          el.style.alignItems='center';
-          el.style.display='flex';
-        });
-
-      }
-      hideCB(); centerCells();
-      var df=p.document.querySelector('div[data-testid="stDataFrame"]');
-      if(df&&!df._cbo){
-        df._cbo=new MutationObserver(function(){hideCB();centerCells();});
-        df._cbo.observe(df,{subtree:true,childList:true});
-      }
-    })();
-    </script>
-    """
-    col_count, col_btn = st.columns([6, 1])
-    with col_count:
-        st.markdown(f'<div class="tv-count" style="padding-top:6px">🔎 {len(filtered):,}개 종목 표시</div>',
-                    unsafe_allow_html=True)
-    with col_btn:
-        st.components.v1.html(_scroll_btn, height=36)
     st.components.v1.html(_cb_hide, height=0)
 
 
